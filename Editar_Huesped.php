@@ -328,7 +328,7 @@ h1 {
         <h2>Menú</h2>
         <ul>
             <li><a href="index.php"><i class="fas fa-home"></i> Inicio</a></li>
-            <li><a href="habitaciones.php"><i class="fas fa-bed"></i> Habitaciones y Servicios</a></li>
+            <li><a href="habitaciones.php"><i class="fas fa-bed"></i> Servicios</a></li>
             <li><a href="huespedes.php"><i class="fas fa-users"></i> Huéspedes</a></li>
             <li><a href="Crear_Recibo.php"><i class="fas fa-pen-alt"></i> Crear Reservación</a></li>
             <li><a href="recibos.php"><i class="fas fa-file-invoice"></i> Reservas</a></li>

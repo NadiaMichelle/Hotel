@@ -2,143 +2,264 @@
 session_start();
 require 'config.php';
 
-// Obtener detalles de la reserva
-if ($_SERVER['REQUEST_METHOD'] == "GET" && isset($_GET['id'])) {
-    $reserva_id = $_GET['id'];
-    $stmt = $pdo->prepare("SELECT * FROM recibos WHERE id = ?");
-    $stmt->execute([$reserva_id]);
-    $reserva = $stmt->fetch(PDO::FETCH_ASSOC);
-
-    if (!$reserva) {
-        echo "ID de reserva no válido.";
-        exit;
-    }
-
-    // Obtener detalles de los elementos
-    $stmt_detalles = $pdo->prepare("SELECT elemento_id FROM detalles_reserva WHERE reserva_id = ?");
-    $stmt_detalles->execute([$reserva_id]);
-    $detalles = $stmt_detalles->fetchAll(PDO::FETCH_COLUMN);
-
-    // Calcular el total base
-    $total_base = 0;
-    if ($reserva['check_in'] && $reserva['check_out']) {
-        $elementos = [];
-        foreach ($detalles as $elemento_id) {
-            $stmt_elemento = $pdo->prepare("SELECT precio, tipo FROM elementos WHERE id = ?");
-            $stmt_elemento->execute([$elemento_id]);
-            $elemento = $stmt_elemento->fetch(PDO::FETCH_ASSOC);
-            $elementos[] = $elemento;
-        }
-
-        foreach ($elementos as $elemento) {
-            if ($elemento['tipo'] === 'habitacion') {
-                // Calcular noches
-                $diff = strtotime($reserva['check_out']) - strtotime($reserva['check_in']);
-                $noches = ceil($diff / (60 * 60 * 24));
-                $total_base += $elemento['precio'] * $noches;
-            } else {
-                $total_base += $elemento['precio'];
-            }
-        }
-    }
-} else {
-    // Manejo de la solicitud POST para creación de reserva
-    $reserva = [
-        'id_huesped' => '',
-        'check_in' => '',
-        'check_out' => '',
-        'tipo_pago' => '',
-        'total_pagar' => '',
-    ];
-    $detalles = [];
-    $total_base = 0;
+if (!isset($_SESSION['usuario_id'])) {
+    header('Location: login.php');
+    exit;
 }
 
-// Obtener lista de huéspedes
-$stmt_huespedes = $pdo->query("SELECT * FROM huespedes");
-$huespedes = $stmt_huespedes->fetchAll(PDO::FETCH_ASSOC);
+$rol = $_SESSION['rol'];
+$nombre_usuario = $_SESSION['nombre_usuario'];
 
-// Obtener lista de elementos
-$sql_elementos = "
-    SELECT * FROM elementos 
-    WHERE (tipo = 'habitacion' AND estado = 'disponible') 
-       OR (tipo = 'servicio' AND estado = 'activo')
-";
-$stmt_elementos = $pdo->prepare($sql_elementos);
-$stmt_elementos->execute();
-$elementos = $stmt_elementos->fetchAll(PDO::FETCH_ASSOC);
+function manejarError($mensaje) {
+    header('Content-Type: application/json');
+    echo json_encode(['success' => false, 'message' => $mensaje]);
+    exit;
+}
 
-// Manejo de la solicitud POST para creación/edición de reserva
-if ($_SERVER['REQUEST_METHOD'] == "POST") {
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     try {
-        $pdo->beginTransaction();
+        // Validar campos requeridos
+        $camposRequeridos = [
+            'check_in' => 'Fecha de check-in es requerida',
+            'check_out' => 'Fecha de check-out es requerida',
+            'iva' => 'El IVA es requerido',
+            'ish' => 'El ISH es requerido',
+            'tarifa_por_noche' => 'La tarifa por noche es requerida',
+            'elementos' => 'Debe seleccionar al menos un elemento',
+            'Nombre_wifi' => 'El nombre del WiFi es requerido',
+            'contrasena' => 'La contraseña del WiFi es requerida'
+        ];
 
-        $reserva_id = $_POST['reserva_id'];
-        $huesped_id = $_POST['huesped_id'];
-        $check_in = $_POST['check_in'];
-        $check_out = $_POST['check_out'];
-        $tipo_pago = $_POST['tipo_pago'];
-        $total_pagar = $_POST['total_pagar'];
-        $aplicar_iva = isset($_POST['aplicar_iva']) ? 1 : 0;
-
-        // Calcular el total base
-        $total_base = 0;
-        $elementos = $_POST['elementos'];
-        foreach ($elementos as $elemento_id) {
-            // Obtener el precio del elemento
-            $stmt_precio = $pdo->prepare("SELECT precio, tipo FROM elementos WHERE id = ?");
-            $stmt_precio->execute([$elemento_id]);
-            $elemento = $stmt_precio->fetch(PDO::FETCH_ASSOC);
-
-            if ($elemento['tipo'] === 'habitacion') {
-                // Calcular noches
-                $diff = strtotime($check_out) - strtotime($check_in);
-                $noches = ceil($diff / (60 * 60 * 24));
-                $total_base += $elemento['precio'] * $noches;
-            } else {
-                $total_base += $elemento['precio'];
+        foreach ($camposRequeridos as $campo => $mensaje) {
+            if (empty($_POST[$campo])) {
+                throw new Exception($mensaje);
             }
         }
 
-        if ($aplicar_iva) {
-            $total_pagar = $total_base * 1.16;
-        } else {
-            $total_pagar = $total_base;
+        // Validar porcentajes
+        $iva = (float)$_POST['iva'];
+        $ish = (float)$_POST['ish'];
+        if ($iva < 0 || $iva > 100 || $ish < 0 || $ish > 100) {
+            throw new Exception("Los porcentajes deben estar entre 0 y 100");
         }
 
-        // Actualizar o insertar la reserva
-        if ($reserva_id) {
-            // Actualizar la reserva
-            $stmt = $pdo->prepare("UPDATE recibos SET id_huesped = ?, check_in = ?, check_out = ?, tipo_pago = ?, total_pagar = ? WHERE id = ?");
-            $stmt->execute([$huesped_id, $check_in, $check_out, $tipo_pago, $total_pagar, $reserva_id]);
-        } else {
-            // Crear una nueva reserva
-            $stmt = $pdo->prepare("INSERT INTO recibos (id_huesped, check_in, check_out, tipo_pago, total_pagar) VALUES (?, ?, ?, ?, ?)");
-            $stmt->execute([$huesped_id, $check_in, $check_out, $tipo_pago, $total_pagar]);
-            $reserva_id = $pdo->lastInsertId();
+        // Validar tarifa
+        $tarifa_por_noche = (float)$_POST['tarifa_por_noche'];
+        if ($tarifa_por_noche <= 0) {
+            throw new Exception("La tarifa por noche debe ser un valor positivo");
         }
 
-        // Limpiar detalles anteriores
-        $stmt = $pdo->prepare("DELETE FROM detalles_reserva WHERE reserva_id = ?");
-        $stmt->execute([$reserva_id]);
-
-        // Insertar nuevos detalles
-        $stmt_detalle = $pdo->prepare("INSERT INTO detalles_reserva (reserva_id, elemento_id, tipo) VALUES (?, ?, ?)");
-        foreach ($elementos as $elemento_id) {
-            // Obtener el tipo del elemento
-            $stmt_tipo = $pdo->prepare("SELECT tipo FROM elementos WHERE id = ?");
-            $stmt_tipo->execute([$elemento_id]);
-            $tipo = $stmt_tipo->fetchColumn();
-
-            $stmt_detalle->execute([$reserva_id, $elemento_id, $tipo]);
+        // Validar fechas
+        $check_in = $_POST['check_in'];
+        $check_out = $_POST['check_out'];
+        $hoy = new DateTime('today');
+        $check_in_date = new DateTime($check_in);
+        $check_out_date = new DateTime($check_out);
+        
+        if ($check_in_date < $hoy) {
+            throw new Exception("No se pueden reservar fechas pasadas");
+        }
+        
+        if ($check_out_date <= $check_in_date) {
+            throw new Exception("Check-out debe ser posterior a check-in");
         }
 
-        $pdo->commit();
-        echo "<script>alert('Reserva guardada correctamente.'); window.location.href='editar_reserva.php?id=" . $reserva_id . "';</script>";
+        // Calcular días de estadía
+        $dias = $check_out_date->diff($check_in_date)->days;
+        $subtotal = $tarifa_por_noche * $dias;
+
+        // Iniciar transacción
+        $pdo->beginTransaction();
+
+        try {
+            // Manejar huésped
+            $huesped_id = $_POST['huesped_id'] ?? null;
+            if (empty($huesped_id)) {
+                if (empty($_POST['nuevo_huesped_nombre'])) {
+                    throw new Exception("El nombre del huésped es obligatorio");
+                }
+                
+                $stmt = $pdo->prepare("INSERT INTO huespedes 
+                    (nombre, rfc, telefono, correo) 
+                    VALUES (?, ?, ?, ?)");
+                $stmt->execute([
+                    $_POST['nuevo_huesped_nombre'],
+                    $_POST['nuevo_huesped_rfc'] ?? null,
+                    $_POST['nuevo_huesped_telefono'] ?? null,
+                    $_POST['nuevo_huesped_correo'] ?? null
+                ]);
+                $huesped_id = $pdo->lastInsertId();
+            }
+
+            // Insertar datos de WiFi
+            $stmt = $pdo->prepare("INSERT INTO internet 
+                (Nombre_wifi, contrasena) 
+                VALUES (?, ?)");
+            $stmt->execute([
+                $_POST['Nombre_wifi'],
+                $_POST['contrasena']
+            ]);
+
+            // Calcular descuento INAPAM
+            $descuento = 0;
+            $numero_inapam = null;
+            if (isset($_POST['aplicar_descuento_inapam'])) {
+                $valor = (float)$_POST['valor_descuento_inapam'];
+                $descuento = ($_POST['tipo_descuento_inapam'] === 'porcentaje') 
+                    ? $subtotal * ($valor / 100)
+                    : $valor;
+                $numero_inapam = $_POST['numero_inapan'] ?? null;
+            }
+
+            // Calcular total
+            $total_pagar = ($subtotal - $descuento) * (1 + ($iva + $ish) / 100);
+
+            // Actualizar recibo
+            $recibo_id = $_POST['recibo_id'];
+            $stmt = $pdo->prepare("UPDATE recibos SET 
+                id_huesped = ?,
+                check_in = ?,
+                check_out = ?,
+                subtotal = ?,
+                descuento = ?,
+                iva = ?,
+                ish = ?,
+                total_pagar = ?,
+                estado_pago = ?,
+                total_pagado = ?,
+                saldo = ?,
+                metodo_pago_primer = ?,
+                metodo_pago_restante = ?,
+                numero_inapan = ?
+                WHERE id = ?");
+            
+            $stmt->execute([
+                $huesped_id,
+                $check_in,
+                $check_out,
+                $subtotal,
+                $descuento,
+                $iva,
+                $ish,
+                $total_pagar,
+                'pendiente',
+                0,
+                $total_pagar,
+                'Pendiente',
+                'Pendiente',
+                $numero_inapam,
+                $recibo_id
+            ]);
+
+            // Manejar pagos
+            $total_pagado = 0;
+            if ($_POST['tipo_pago'] === 'completo') {
+                $metodo = $_POST['metodo_pago_completo'];
+                $detalle_metodo = $metodo;
+                
+                if ($metodo === 'otro') {
+                    $detalle_metodo = $_POST['detalle_metodo_completo'] ?? 'Otro método';
+                }
+                
+                $monto = (float)$_POST['monto_pago_completo'];
+                $total_pagado = $monto;
+                
+                // Insertar anticipo
+                $stmt = $pdo->prepare("INSERT INTO anticipos 
+                    (recibo_id, monto, metodo_pago, fecha) 
+                    VALUES (?, ?, ?, NOW())");
+                $stmt->execute([$recibo_id, $monto, $detalle_metodo]);
+                
+            } else {
+                foreach ($_POST['primer_pago'] as $key => $monto) {
+                    $metodo = $_POST['metodo_pago_parcial'][$key];
+                    $detalle_metodo = $metodo;
+                    
+                    if ($metodo === 'otro') {
+                        $detalle_metodo = $_POST['detalle_metodo_parcial'][$key] ?? 'Otro método';
+                    }
+                    
+                    $monto = (float)$monto;
+                    $total_pagado += $monto;
+                    
+                    $stmt = $pdo->prepare("INSERT INTO anticipos 
+                        (recibo_id, monto, metodo_pago, fecha) 
+                        VALUES (?, ?, ?, NOW())");
+                    $stmt->execute([$recibo_id, $monto, $detalle_metodo]);
+                }
+            }
+
+            // Actualizar estado de pago
+            $saldo = $total_pagar - $total_pagado;
+            $estado = $saldo <= 0 ? 'pagado' : 'pendiente';
+            
+            $stmt = $pdo->prepare("UPDATE recibos SET 
+                total_pagado = ?,
+                saldo = ?,
+                estado_pago = ?,
+                metodo_pago_restante = ?
+                WHERE id = ?");
+            $stmt->execute([$total_pagado, $saldo, $estado, $_POST['metodo_pago_parcial'][0], $recibo_id]);
+
+            // Insertar elementos reservados
+            $stmt = $pdo->prepare("DELETE FROM detalles_reserva WHERE recibo_id = ?");
+            $stmt->execute([$recibo_id]);
+
+            $stmt = $pdo->prepare("INSERT INTO detalles_reserva 
+                (recibo_id, elemento_id, tarifa) 
+                VALUES (?, ?, ?)");
+                
+            foreach ($_POST['elementos'] as $elemento_id) {
+                if (!is_numeric($elemento_id)) {
+                    throw new Exception("ID de elemento inválido");
+                }
+                $stmt->execute([$recibo_id, $elemento_id, $tarifa_por_noche]);
+            }
+
+            $pdo->commit();
+
+            echo json_encode([
+                'success' => true,
+                'message' => 'Reserva actualizada exitosamente',
+                'recibo_id' => $recibo_id,
+                'redirect' => 'recibos.php' // URL de redirección
+            ]);
+        } catch (Exception $e) {
+            $pdo->rollBack();
+            throw $e;
+        }
+        
     } catch (Exception $e) {
-        $pdo->rollBack();
-        echo "<script>alert('Error: " . $e->getMessage() . "');</script>";
+        manejarError($e->getMessage());
     }
+    exit;
+}
+
+// Obtener datos del recibo
+if (isset($_GET['id'])) {
+    $stmt = $pdo->prepare("SELECT * FROM recibos WHERE id = ?");
+    $stmt->execute([$_GET['id']]);
+    $recibo = $stmt->fetch();
+
+    // Determinar tipo de pago dinámicamente
+    $recibo['tipo_pago'] = ($recibo['estado_pago'] === 'pagado' || $recibo['total_pagado'] >= $recibo['total_pagar'])
+                          ? 'completo' 
+                          : 'parcial';
+
+    // Obtener elementos reservados
+    $stmt = $pdo->prepare("SELECT elemento_id FROM detalles_reserva WHERE recibo_id = ?");
+    $stmt->execute([$_GET['id']]);
+    $elementos = $stmt->fetchAll(PDO::FETCH_COLUMN);
+    
+    // En el bloque GET, al recuperar la tarifa:
+    $stmt = $pdo->prepare("SELECT tarifa FROM detalles_reserva WHERE recibo_id = ? LIMIT 1");
+    $stmt->execute([$_GET['id']]);
+    $tarifa = $stmt->fetchColumn();
+
+    // Obtener anticipos
+    $stmt = $pdo->prepare("SELECT * FROM anticipos WHERE recibo_id = ?");
+    $stmt->execute([$_GET['id']]);
+    $anticipos = $stmt->fetchAll();
 }
 ?>
 
@@ -147,440 +268,664 @@ if ($_SERVER['REQUEST_METHOD'] == "POST") {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Editar Reserva</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <title>Editar Reserva</title>
     <style>
-        /* Estilos generales */
-        body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background-color: #f4f6f9;
-            margin: 0;
-            padding: 0;
-            display: flex;
-            min-height: 100vh;
-        }
+   :root {
+    --color-primario: #2c3e50; /* Azul oscuro */
+    --color-secundario: #3498db; /* Azul claro */
+    --color-fondo: #f5f6fa; /* Blanco grisáceo */
+    --color-borde: #e0e0e0; /* Gris claro */
+    --color-accent: #e74c3c; /* Rojo para resaltar */
+    --color-background: #ffffff; /* Blanco puro */
+    --color-text: #333333; /* Texto oscuro */
+    --color-border: #bdc3c7; /* Gris para bordes */
+    --color-shadow: rgba(0, 0, 0, 0.1); /* Sombra suave */
+    --color-letters: #ffffff; /* Texto blanco para fondos oscuros */
+}
 
-        /* Estilos para la barra lateral */
-        .sidebar {
-            width: 250px;
-            background-color: #2c3e50;
-            color: white;
-            padding: 20px;
-            box-sizing: border-box;
-            position: fixed;
-            top: 0;
-            left: 0;
-            height: 100vh;
-            overflow-y: auto;
-            transition: left 0.3s ease;
-        }
+body {
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    background: var(--color-fondo);
+    color: var(--color-text);
+    margin: 0;
+    padding: 0;
+    display: flex;
+}
 
-        .sidebar.active {
-            left: 0;
-        }
+.contenedor {
+    width: 100%;
+    max-width: 1200px;
+    margin: 20px auto;
+    background: var(--color-background);
+    padding: 2rem;
+    border-radius: 1rem;
+    box-shadow: 0 0.5rem 1rem var(--color-shadow);
+}
 
-        .sidebar h2 {
-            text-align: center;
-            margin-bottom: 30px;
-            font-size: 1.5em;
-        }
+.seccion {
+    margin-bottom: 2rem;
+    padding: 1.5rem;
+    border-radius: 0.8rem;
+    background: #ffffff;
+    border: 1px solid var(--color-borde);
+    position: relative;
+}
 
-        .sidebar ul {
-            list-style: none;
-            padding: 0;
-            margin: 0;
-        }
+.seccion::before {
+    font-family: "Font Awesome 5 Free";
+    font-weight: 900;
+    position: absolute;
+    top: 1.5rem;
+    left: 1.5rem;
+    font-size: 1.2em;
+    color: var(--color-secundario);
+}
 
-        .sidebar ul li {
-            margin: 20px 0;
-        }
+.habitaciones-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+    gap: 1rem;
+    max-height: 400px;
+    overflow-y: auto;
+    padding: 1rem 0;
+}
 
-        .sidebar ul li a {
-            color: white;
-            text-decoration: none;
-            display: flex;
-            align-items: center;
-            font-size: 1.1em;
-            padding: 10px;
-            border-radius: 4px;
-            transition: background-color 0.3s;
-        }
+.habitacion-item {
+    padding: 1rem;
+    border: 2px solid var(--color-borde);
+    border-radius: 0.5rem;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    display: flex;
+    align-items: center;
+}
 
-        .sidebar ul li a i {
-            margin-right: 10px;
-            font-size: 1.2em;
-        }
+.habitacion-item:hover {
+    border-color: var(--color-secundario);
+}
 
-        .sidebar ul li a:hover {
-            background-color: rgba(255, 255, 255, 0.2);
-        }
+.campo-formulario {
+    margin-bottom: 1.5rem;
+}
 
-        /* Contenido principal */
-        .content {
-            margin-left: 250px;
-            padding: 30px;
-            flex-grow: 1;
-            overflow-y: auto;
-        }
+input, select {
+    width: 100%;
+    padding: 0.8rem;
+    border: 2px solid var(--color-borde);
+    border-radius: 0.5rem;
+    margin-top: 0.5rem;
+    transition: border-color 0.3s;
+}
 
-        /* Estilos para el contenedor de la reserva */
-        .container {
-            max-width: 800px;
-            margin: 0 auto;
-            background-color: white;
-            padding: 20px;
-            border-radius: 8px;
-            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-        }
+input:focus, select:focus {
+    border-color: var(--color-secundario);
+    outline: none;
+}
 
-        h1 {
-            text-align: center;
-            color: #2c3e50;
-            margin-bottom: 20px;
-        }
+button {
+    background: var(--color-secundario);
+    color: var(--color-letters);
+    padding: 1rem 2rem;
+    border: none;
+    border-radius: 0.5rem;
+    cursor: pointer;
+    margin-top: 1rem;
+    transition: background 0.3s;
+}
 
-        form {
-            display: flex;
-            flex-direction: column;
-        }
+button:hover {
+    background: #2980b9;
+}
 
-        label {
-            margin-top: 10px;
-            margin-bottom: 5px;
-            color: #555;
-        }
+.sidebar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 250px;
+    height: 100vh;
+    background-color: var(--color-primario);
+    color: var(--color-letters);
+    padding: 20px;
+    box-sizing: border-box;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    z-index: 1000;
+}
 
-        input, select, button {
-            padding: 10px;
-            border: 1px solid #ccc;
-            border-radius: 4px;
-            font-size: 1em;
-        }
+.sidebar h2 {
+    text-align: center;
+    margin-bottom: 30px;
+    font-size: 1.5em;
+}
 
-        button {
-            margin-top: 20px;
-            background-color: #3498db;
-            color: white;
-            border: none;
-            cursor: pointer;
-            transition: background-color 0.3s;
-        }
+.sidebar ul {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+}
 
-        button:hover {
-            background-color: #2980b9;
-        }
+.sidebar ul li {
+    margin: 20px 0;
+}
 
-        /* Estilos para la sección de habitaciones y servicios */
-        .seccion {
-            margin-top: 20px;
-        }
+.sidebar ul li a {
+    color: var(--color-letters);
+    text-decoration: none;
+    display: flex;
+    align-items: center;
+    font-size: 1.1em;
+    padding: 10px;
+    border-radius: 4px;
+    transition: background-color 0.3s;
+}
 
-        .habitaciones-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-            gap: 10px;
-            margin-top: 10px;
-        }
+.sidebar ul li a i {
+    margin-right: 10px;
+    font-size: 1.2em;
+}
 
-        .habitacion-item {
-            padding: 10px;
-            border: 1px solid #ccc;
-            border-radius: 4px;
-            cursor: pointer;
-            transition: border-color 0.3s, transform 0.3s;
-            background-color: #f9f9f9;
-        }
+.sidebar ul li a:hover {
+    background-color: rgba(255, 255, 255, 0.2);
+}
 
-        .habitacion-item:hover {
-            border-color: #3498db;
-            transform: translateY(-3px);
-        }
+.toggle-sidebar {
+    display: none;
+    position: fixed;
+    top: 1px;
+    left: 15px;
+    background: var(--color-primario);
+    color: var(--color-letters);
+    border: none;
+    padding: 10px;
+    border-radius: 4px;
+    z-index: 1000;
+}
 
-        .habitacion-item label {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            cursor: pointer;
-        }
+.overlay {
+    display: none;
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0,0,0,0.5);
+    z-index: 998;
+}
 
-        .icono {
-            font-size: 1.5em;
-        }
+.contenido {
+    margin-left: 250px;
+    padding: 30px;
+    transition: margin 0.3s;
+}
 
-        .detalles .nombre {
-            font-weight: bold;
-        }
+@media (max-width: 768px) {
+    .sidebar {
+        position: fixed;
+        top: 0;
+        left: -250px;
+        height: 100%;
+        z-index: 999;
+        transition: left 0.3s ease;
+    }
 
-        .detalles .precio {
-            color: #e74c3c;
-        }
+    .sidebar.active {
+        left: 0;
+    }
 
-        /* Botón de guardar cambios */
-        .boton-guardar {
-            background-color: #27ae60;
-        }
+    .toggle-sidebar {
+        display: block;
+    }
 
-        .boton-guardar:hover {
-            background-color: #1e8449;
-        }
+    .overlay {
+        display: none;
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(0,0,0,0.5);
+        z-index: 998;
+        transition: display 0.3s ease;
+    }
 
-        /* Responsividad */
-        @media (max-width: 768px) {
-            .sidebar {
-                left: -250px;
-            }
+    .overlay.active {
+        display: block;
+    }
 
-            .content {
-                margin-left: 0;
-            }
+    .contenido {
+        margin-left: 0;
+        padding: 20px;
+        padding-top: 60px;
+    }
+}
 
-            .toggle-sidebar {
-                display: block;
-            }
-        }
+@media (max-width: 480px) {
+    .contenido {
+        padding: 15px;
+        padding-top: 60px;
+    }
 
-        /* Botón para togglear el sidebar en móvil */
-        .toggle-sidebar {
-            display: none;
-            position: fixed;
-            top: 15px;
-            left: 15px;
-            background: #2c3e50;
-            color: white;
-            border: none;
-            padding: 10px;
-            border-radius: 4px;
-            z-index: 1000;
-            cursor: pointer;
-        }
+    h1 {
+        font-size: 1.5rem;
+        margin-bottom: 20px;
+    }
 
-        /* Overlay para el sidebar en móvil */
-        .overlay {
-            display: none;
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background: rgba(0,0,0,0.5);
-            z-index: 998;
-        }
+    .sidebar ul li {
+        padding: 12px 15px;
+    }
 
-        .overlay.active {
-            display: block;
-        }
-
-        /* Sección de IVA */
-        .iva-seccion {
-            margin-top: 20px;
-        }
-
-        .iva-seccion label {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            font-size: 1em;
-        }
-
-        .iva-seccion input[type="checkbox"] {
-            width: 20px;
-            height: 20px;
-        }
-
-        .iva-seccion p {
-            margin: 0;
-            font-size: 1em;
-            color: #555;
-        }
+    .sidebar h2 {
+        font-size: 1.3rem;
+    }
+}
+</style>
     </style>
 </head>
 <body>
-    <!-- Barra lateral -->
-    <nav class="sidebar">
-        <h2>Menú</h2>
+    <button class="toggle-sidebar d-md-none"><i class="fas fa-bars"></i></button>
+
+    <aside class="sidebar">
+        <h2><i class="fas fa-columns"></i> Menú</h2>
         <ul>
-            <li><a href="index.php"><i class="fas fa-home"></i> Inicio</a></li>
-            <li><a href="habitaciones.php"><i class="fas fa-bed"></i> Habitaciones y Servicios</a></li>
-            <li><a href="huespedes.php"><i class="fas fa-users"></i> Huéspedes</a></li>
-            <li><a href="Crear_Recibo.php"><i class="fas fa-pen-alt"></i> Crear Reservación</a></li>
-            <li><a href="recibos.php"><i class="fas fa-file-invoice"></i> Reservas</a></li>
+            <?php if ($rol === 'admin'): ?>
+                <li><a href="index.php"><i class="fas fa-home"></i> Inicio</a></li>
+                <li><a href="habitaciones.php"><i class="fas fa-bed"></i> Habitaciones</a></li>
+                <li><a href="huespedes.php"><i class="fas fa-users"></i> Huéspedes</a></li>
+            <?php endif; ?>
+            <li><a href="Crear_Recibo.php"><i class="fas fa-pen-alt"></i> Generar Recibo</a></li>
+            <li><a href="recibos.php"><i class="fas fa-file-invoice"></i> Registro de Caja</a></li>
             <li><a href="index.php" class="logout-btn"><i class="fas fa-sign-out-alt"></i> Salir</a></li>
         </ul>
-    </nav>
-
-    <!-- Overlay para el sidebar en móvil -->
+    </aside>
     <div class="overlay"></div>
+    <div class="contenedor">
+        <h1>Editar Reserva #<?= $recibo['id'] ?></h1>
+        <form method="post" id="formEditar">
+            <input type="hidden" name="recibo_id" value="<?= $recibo['id'] ?>">
 
-    <!-- Contenido principal -->
-    <div class="content">
-        <div class="container">
-            <h1>Editar Reserva</h1>
-            <form method="POST" action="editar_reserva.php">
-                <input type="hidden" name="reserva_id" value="<?= htmlspecialchars($reserva['id']) ?>">
-                <label for="huesped_id">Huésped:</label>
-                <select id="huesped_id" name="huesped_id">
+            <!-- Sección Elementos -->
+            <div class="seccion" id="seccion-elementos">
+                <div class="habitaciones-grid" id="elementos-grid">
                     <?php
-                    foreach ($huespedes as $huesped) {
-                        $selected = ($huesped['id'] == $reserva['id_huesped']) ? 'selected' : '';
-                        echo "<option value='" . htmlspecialchars($huesped['id']) . "' " . $selected . ">" . htmlspecialchars($huesped['nombre']) . "</option>";
-                    }
+                    // Consulta SQL con filtro (por ejemplo, solo elementos disponibles)
+                    $sql = "SELECT * FROM elementos WHERE estado = 'disponible'"; // Cambia 'activo' según tus necesidades
+                    $stmt = $pdo->query($sql);
+                    while ($elemento = $stmt->fetch()):
                     ?>
-                </select>
-
-                <label for="check_in">Check-in:</label>
-                <input id="check_in" type="date" name="check_in" value="<?= htmlspecialchars(date('Y-m-d', strtotime($reserva['check_in']))) ?>">
-
-                <label for="check_out">Check-out:</label>
-                <input id="check_out" type="date" name="check_out" value="<?= htmlspecialchars(date('Y-m-d', strtotime($reserva['check_out']))) ?>">
-
-                <label for="tipo_pago">Método de pago:</label>
-                <select id="tipo_pago" name="tipo_pago">
-                    <option value="efectivo" <?= ($reserva['tipo_pago'] == 'efectivo') ? 'selected' : '' ?>>Efectivo</option>
-                    <option value="tarjeta" <?= ($reserva['tipo_pago'] == 'tarjeta') ? 'selected' : '' ?>>Tarjeta</option>
-                    <option value="transferencia" <?= ($reserva['tipo_pago'] == 'transferencia') ? 'selected' : '' ?>>Transferencia</option>
-                </select>
-
-                <label for="total_pagar">Total a pagar:</label>
-                <input id="total_pagar" type="number" step="0.01" name="total_pagar" value="<?= htmlspecialchars($reserva['total_pagar']) ?>" readonly>
-
-                <!-- Sección de IVA -->
-                <div class="seccion">
-    <div class="campo-formulario">
-        <label>
-            <input type="checkbox" id="aplicar_iva" name="aplicar_iva" <?= ($reserva['total_pagar'] > $total_base) ? 'checked' : '' ?>> 
-            Aplicar IVA (16%)
-        </label>
-    </div>
-                </div>
-
-                <!-- Sección de habitaciones y servicios -->
-                <div class="seccion">
-                    <div class="filtro">
-                        <label for="tipo-elemento">Seleccione el tipo de elemento:</label>
-                        <select id="tipo-elemento" name="tipo-elemento">
-                            <option value="todos">Todos</option>
-                            <option value="habitacion">Habitaciones</option>
-                            <option value="servicio">Servicios</option>
-                        </select>
-                    </div>
-                    <div class="habitaciones-grid" id="elementos-grid">
-                        <?php
-                        foreach ($elementos as $e) {
-                            $checked = (in_array($e['id'], $detalles)) ? 'checked' : '';
-                            echo '<div class="habitacion-item">';
-                            echo '<label>';
-                            echo '<input type="checkbox" name="elementos[]" value="' . htmlspecialchars($e['id']) . '" data-precio="' . $e['precio'] . '" data-tipo="' . htmlspecialchars($e['tipo']) . '" ' . $checked . '>';
-                            echo '<div class="icono">';
-                            if ($e['tipo'] === 'habitacion') {
-                                echo '<i class="fas fa-bed"></i>';
-                            } elseif ($e['tipo'] === 'servicio') {
-                                echo '<i class="fas fa-concierge-bell"></i>';
+                    <div class="habitacion-item">
+                        <label>
+                            <input type="checkbox" name="elementos[]" value="<?= htmlspecialchars($elemento['id']) ?>"
+                                <?= in_array($elemento['id'], $elementos) ? 'checked' : '' ?>>
+                            <?php
+                            // Determinar el icono según el tipo de elemento
+                            $tipo = htmlspecialchars($elemento['tipo']);
+                            if ($tipo === 'habitacion') {
+                                echo '<i class="fas fa-bed"></i> ';
+                            } elseif ($tipo === 'servicio') {
+                                echo '<i class="fas fa-concierge-bell"></i> ';
+                            } else {
+                                echo '<i class="fas fa-question-circle"></i> ';
                             }
-                            echo '</div>';
-                            echo '<div class="detalles">';
-                            echo '<span class="nombre">' . htmlspecialchars($e['nombre']) . '</span>';
-                            echo '<span class="precio">$' . number_format($e['precio'], 2) . '</span>';
-                            echo '<p class="descripcion">' . htmlspecialchars($e['descripcion']) . '</p>';
-                            echo '</div>';
-                            echo '</label>';
-                            echo '</div>';
-                        }
-                        ?>
+                            ?>
+                            <?= htmlspecialchars($elemento['nombre']) ?>
+                            <br>
+                            <span class="descripcion"><?= htmlspecialchars($elemento['descripcion']) ?></span>
+                        </label>
+                    </div>
+                    <?php endwhile; ?>
+                </div>
+            </div>
+
+            <!-- Sección Huésped -->
+            <div class="seccion" id="seccion-huesped">
+                <i class="fas fa-user section-icon"></i>
+                <select id="huesped_id" name="huesped_id">
+                    <option value="">Nuevo huésped</option>
+                    <?php 
+                    $stmt = $pdo->query("SELECT * FROM huespedes");
+                    while ($h = $stmt->fetch()): ?>
+                    <option value="<?= $h['id'] ?>" <?= ($h['id'] == $recibo['id_huesped']) ? 'selected' : '' ?>>
+                        <?= htmlspecialchars($h['nombre']) ?>
+                    </option>
+                    <?php endwhile; ?>
+                </select>
+                
+                <div id="nuevo-huesped" style="display: <?= empty($recibo['id_huesped']) ? 'block' : 'none' ?>;">
+                    <input type="text" name="nuevo_huesped_nombre" id="nuevo_huesped_nombre" placeholder="Nombre*" 
+                        value="<?= htmlspecialchars($recibo['nombre_huesped'] ?? '') ?>">
+                    <input type="text" name="nuevo_huesped_rfc" placeholder="RFC" 
+                        value="<?= htmlspecialchars($recibo['rfc_huesped'] ?? '') ?>">
+                    <input type="tel" name="nuevo_huesped_telefono" placeholder="Teléfono" 
+                        value="<?= htmlspecialchars($recibo['telefono_huesped'] ?? '') ?>">
+                    <input type="email" name="nuevo_huesped_correo" placeholder="Correo" 
+                        value="<?= htmlspecialchars($recibo['correo_huesped'] ?? '') ?>">
+                </div>
+            </div>
+
+            <!-- Sección Fechas -->
+            <div class="seccion" id="seccion-fechas">
+                <i class="fas fa-calendar-alt section-icon"></i>
+                <div class="campo-formulario">
+                    <label>Check-in:</label>
+                    <input type="date" name="check_in" required 
+                        value="<?= htmlspecialchars($recibo['check_in'] ?? '') ?>">
+                </div>
+                <div class="campo-formulario">
+                    <label>Check-out:</label>
+                    <input type="date" name="check_out" required
+                        value="<?= htmlspecialchars($recibo['check_out'] ?? '') ?>">
+                </div>
+            </div>
+            <!-- Sección Tarifa por Noche -->
+            <i class="fas fa-couch section-icon"></i>
+            <div class="campo-formulario">
+                <label>Tarifa por noche:</label>
+                <input type="number" id="tarifa_por_noche" name="tarifa_por_noche" 
+                    step="0.01" min="0" required placeholder="Ingrese tarifa"
+                    value="<?= htmlspecialchars($tarifa ?? '') ?>">
+            </div>
+
+            <!-- Sección Impuestos -->
+            <div class="seccion" id="seccion-impuestos">
+                <i class="fas fa-percent section-icon"></i>
+                <div class="campo-formulario">
+                    <label>IVA (%):</label>
+                    <input type="number" id="iva" name="iva" step="0.01" min="0" max="100" 
+                        value="<?= htmlspecialchars($recibo['iva'] ?? 16) ?>" required>
+                </div>
+                <div class="campo-formulario">
+                    <label>ISH (%):</label>
+                    <input type="number" id="ish" name="ish" step="0.01" min="0" max="100"
+                        value="<?= htmlspecialchars($recibo['ish'] ?? 3) ?>" required>
+                </div>
+            </div>
+
+            <!-- Sección Descuentos -->
+            <div class="seccion" id="seccion-descuentos">
+                <i class="fas fa-tags section-icon"></i>
+                <label>
+                    <input type="checkbox" id="aplicar_descuento_inapam" name="aplicar_descuento_inapam"
+                        <?= !empty($recibo['descuento']) ? 'checked' : '' ?>> Aplicar descuento INAPAM
+                </label>
+                <div id="campos-descuento" style="display: <?= !empty($recibo['descuento']) ? 'block' : 'none' ?>;">
+                    <select id="tipo_descuento_inapam" name="tipo_descuento_inapam">
+                        <option value="porcentaje" <?= ($recibo['tipo_descuento'] ?? 'porcentaje') === 'porcentaje' ? 'selected' : '' ?>>Porcentaje</option>
+                        <option value="monto" <?= ($recibo['tipo_descuento'] ?? 'porcentaje') === 'monto' ? 'selected' : '' ?>>Monto fijo</option>
+                    </select>
+                    <input type="text" id="valor_descuento_inapam" name="valor_descuento_inapam" 
+                        step="0.01" min="0" placeholder="Valor del descuento"
+                        value="<?= htmlspecialchars($recibo['valor_descuento'] ?? '') ?>">
+                </div>
+            </div>
+
+            <!-- Sección Pagos -->
+            <div class="seccion" id="seccion-pagos">
+                <i class="fas fa-money-check section-icon"></i>
+                <select id="tipo_pago" name="tipo_pago">
+                    <option value="completo" <?= $recibo['tipo_pago'] === 'completo' ? 'selected' : '' ?>>Completo</option>
+                    <option value="parcial" <?= $recibo['tipo_pago'] === 'parcial' ? 'selected' : '' ?>>Parcial</option>
+                </select>
+
+                <!-- Pago Completo -->
+                <div id="pago-completo" style="display: <?= $recibo['tipo_pago'] === 'completo' ? 'block' : 'none' ?>;">
+                    <div class="campo-formulario">
+                        <label>Método de Pago:</label>
+                        <select name="metodo_pago_completo">
+                            <?php $metodoActual = $recibo['metodo_pago_primer']; ?>
+                            <option value="efectivo" <?= $metodoActual === 'efectivo' ? 'selected' : '' ?>>Efectivo</option>
+                            <option value="tarjeta_debito" <?= $metodoActual === 'tarjeta_debito' ? 'selected' : '' ?>>Tarjeta Débito</option>
+                            <option value="tarjeta_credito" <?= $metodoActual === 'tarjeta_credito' ? 'selected' : '' ?>>Tarjeta Crédito</option>
+                            <option value="transferencia" <?= $metodoActual === 'transferencia' ? 'selected' : '' ?>>Transferencia</option>
+                            <option value="otro" <?= !in_array($metodoActual, ['efectivo','tarjeta_debito','tarjeta_credito','transferencia']) ? 'selected' : '' ?>>Otro</option>
+                        </select>
+                        <div class="otro-metodo-container" style="display: <?= !in_array($metodoActual, ['efectivo','tarjeta_debito','tarjeta_credito','transferencia']) ? 'block' : 'none' ?>;">
+                            <input type="text" name="detalle_metodo_completo" 
+                                value="<?= htmlspecialchars(!in_array($metodoActual, ['efectivo','tarjeta_debito','tarjeta_credito','transferencia']) ? $metodoActual : '') ?>">
+                        </div>
+                    </div>
+                    <div class="campo-formulario">
+                        <label>Monto Total:</label>
+                        <input type="number" name="monto_pago_completo" step="0.01"
+                            value="<?= htmlspecialchars($recibo['total_pagado']) ?>" required>
                     </div>
                 </div>
 
-                <button type="submit" class="boton-guardar">Guardar Cambios</button>
-            </form>
-        </div>
+                <!-- Pagos Parciales -->
+                <div id="pago-parcial" style="display: <?= $recibo['tipo_pago'] === 'parcial' ? 'block' : 'none' ?>;">
+                    <button type="button" id="agregar-pago">+ Añadir Pago</button>
+                    <?php foreach ($anticipos as $index => $pago): ?>
+                    <div class="pago-item">
+                        <select name="metodo_pago_parcial[]" class="metodo-pago">
+                            <?php $metodoPago = $pago['metodo_pago']; ?>
+                            <option value="efectivo" <?= $metodoPago === 'efectivo' ? 'selected' : '' ?>>Efectivo</option>
+                            <option value="tarjeta_debito" <?= $metodoPago === 'tarjeta_debito' ? 'selected' : '' ?>>Tarjeta Débito</option>
+                            <option value="tarjeta_credito" <?= $metodoPago === 'tarjeta_credito' ? 'selected' : '' ?>>Tarjeta Crédito</option>
+                            <option value="transferencia" <?= $metodoPago === 'transferencia' ? 'selected' : '' ?>>Transferencia</option>
+                            <option value="otro" <?= !in_array($metodoPago, ['efectivo','tarjeta_debito','tarjeta_credito','transferencia']) ? 'selected' : '' ?>>Otro</option>
+                        </select>
+                        <div class="otro-metodo-container" style="display: <?= !in_array($metodoPago, ['efectivo','tarjeta_debito','tarjeta_credito','transferencia']) ? 'block' : 'none' ?>;">
+                            <input type="text" name="detalle_metodo_parcial[]" 
+                                value="<?= htmlspecialchars(!in_array($metodoPago, ['efectivo','tarjeta_debito','tarjeta_credito','transferencia']) ? $metodoPago : '') ?>">
+                        </div>
+                        <input type="number" name="primer_pago[]" step="0.01" 
+                            value="<?= htmlspecialchars($pago['monto']) ?>" required>
+                    </div>
+                    <?php endforeach; ?>
+                </div>
+            </div>
+
+            <!-- Sección Wifi -->
+            <div class="seccion" id="seccion-wifi">
+                <i class="fas fa-wifi section-icon"></i>
+                <label>Wifi:</label>
+                <input type="text" name="Nombre_wifi" placeholder="Nombre WIFI" 
+                    value="<?= htmlspecialchars($recibo['Nombre_wifi'] ?? '') ?>">
+                <input type="text" name="contrasena" placeholder="Contraseña Wifi" 
+                    value="<?= htmlspecialchars($recibo['contrasena'] ?? '') ?>">
+            </div>
+
+            <!-- Totales -->
+            <div class="seccion" id="seccion-totales">
+                <i class="fas fa-calculator section-icon"></i>
+                <div>Subtotal: $<span id="subtotal">0.00</span></div>
+                <div>Descuento: $<span id="descuento">0.00</span></div>
+                <div>Impuestos: $<span id="impuestos">0.00</span></div>
+                <div>Total: $<span id="total">0.00</span></div>
+                <div>Pagado: $<span id="pagado">0.00</span></div>
+                <div>Saldo: $<span id="saldo">0.00</span></div>
+                <div id="cambio" style="display:none;">
+                    Cambio: $<span id="cambio-monto" name= 'saldo'>0.00</span>
+                </div>
+            </div>
+
+            <button type="submit">Guardar Cambios</button>
+        </form>
     </div>
 
-    <!-- Script para calcular el total -->
     <script>
-// Cálculos automáticos
-// Cálculos automáticos
-function calcularTotal() {
-    let total = 0;
-    const checkIn = $('#check_in').val();
-    const checkOut = $('#check_out').val();
+    document.addEventListener('DOMContentLoaded', function() {
+        const form = document.getElementById('formEditar');
+        const tipoPago = document.getElementById('tipo_pago');
+        const huespedSelect = document.getElementById('huesped_id');
+        const nuevoHuespedDiv = document.getElementById('nuevo-huesped');
+        const nombreInput = document.getElementById('nuevo_huesped_nombre');
 
-    if (checkIn && checkOut) {
-        const diff = new Date(checkOut) - new Date(checkIn);
-        const noches = Math.ceil(diff / (1000 * 3600 * 24)) || 0;
+        // Manejar nuevo huésped
+        function actualizarCamposHuesped() {
+            if (huespedSelect.value === '') {
+                nuevoHuespedDiv.style.display = 'block';
+                nombreInput.setAttribute('required', 'required');
+            } else {
+                nuevoHuespedDiv.style.display = 'none';
+                nombreInput.removeAttribute('required');
+            }
+        }
+        huespedSelect.addEventListener('change', actualizarCamposHuesped);
+        actualizarCamposHuesped();
 
-        if (noches <= 0) {
-            alert('Error: La fecha de salida debe ser después de la fecha de entrada.');
-            return;
+        // Manejar descuento INAPAM
+        const aplicarDescuentoInapam = document.getElementById('aplicar_descuento_inapam');
+        if (aplicarDescuentoInapam) {
+            aplicarDescuentoInapam.addEventListener('change', function() {
+                const camposDescuento = document.getElementById('campos-descuento');
+                if (this.checked) {
+                    camposDescuento.style.display = 'block';
+                } else {
+                    camposDescuento.style.display = 'none';
+                }
+            });
         }
 
-        $('input[name="elementos[]"]:checked').each(function() {
-            const tipo = $(this).data('tipo');
-            const precio = parseFloat($(this).data('precio'));
-            if (isNaN(precio)) {
-                alert('Error: El precio de uno de los elementos seleccionados no es válido.');
-                return;
+        // Manejar tipo de pago
+        function actualizarSeccionPagos() {
+            const pagoCompleto = document.getElementById('pago-completo');
+            const pagoParcial = document.getElementById('pago-parcial');
+            
+            if (tipoPago.value === 'completo') {
+                pagoCompleto.style.display = 'block';
+                pagoParcial.style.display = 'none';
+            } else {
+                pagoCompleto.style.display = 'none';
+                pagoParcial.style.display = 'block';
+            }
+        }
+        tipoPago.addEventListener('change', actualizarSeccionPagos);
+        actualizarSeccionPagos();
+
+        // Agregar pagos parciales
+        document.getElementById('agregar-pago').addEventListener('click', function() {
+            const div = document.createElement('div');
+            div.className = 'pago-item';
+            div.innerHTML = `
+                <select name="metodo_pago_parcial[]" class="metodo-pago">
+                    <option value="efectivo">Efectivo</option>
+                    <option value="tarjeta_debito">Tarjeta Débito</option>
+                    <option value="tarjeta_credito">Tarjeta Crédito</option>
+                    <option value="transferencia">Transferencia</option>
+                    <option value="otro">Otro</option>
+                </select>
+                <div class="otro-metodo-container" style="display: none;">
+                    <input type="text" name="detalle_metodo_parcial[]" placeholder="Especificar método">
+                </div>
+                <input type="number" name="primer_pago[]" step="0.01" placeholder="Monto">
+            `;
+            document.getElementById('pago-parcial').appendChild(div);
+
+            // Evento para método "Otro"
+            div.querySelector('.metodo-pago').addEventListener('change', function() {
+                const container = this.parentElement.querySelector('.otro-metodo-container');
+                container.style.display = this.value === 'otro' ? 'block' : 'none';
+            });
+        });
+
+        // Calcular totales
+        function calcularTotales() {
+            // Obtener valores principales
+            const tarifa = parseFloat(document.getElementById('tarifa_por_noche').value) || 0;
+            const checkIn = new Date(form.check_in.value);
+            const checkOut = new Date(form.check_out.value);
+            
+            // Calcular días
+            const diferenciaTiempo = checkOut.getTime() - checkIn.getTime();
+            const dias = Math.ceil(diferenciaTiempo / (1000 * 3600 * 24)) || 0;
+            
+            // Calcular subtotal
+            const subtotal = tarifa * dias;
+
+            // Calcular descuento
+            let descuento = 0;
+            if (aplicarDescuentoInapam.checked) {
+                const tipoDescuento = document.getElementById('tipo_descuento_inapam').value;
+                const valorDescuento = parseFloat(document.getElementById('valor_descuento_inapam').value) || 0;
+                
+                descuento = tipoDescuento === 'porcentaje' 
+                    ? subtotal * (valorDescuento / 100)
+                    : valorDescuento;
             }
 
-            if (tipo === 'habitacion') {
-                total += precio * noches;
-            } else if (tipo === 'servicio') {
-                total += precio;
+            // Calcular impuestos
+            const iva = parseFloat(document.getElementById('iva').value) || 0;
+            const ish = parseFloat(document.getElementById('ish').value) || 0;
+            const baseImponible = subtotal - descuento;
+            const impuestos = baseImponible * (iva + ish) / 100;
+            
+            // Calcular total
+            const total = baseImponible + impuestos;
+
+            // Calcular pagos
+            let pagos = 0;
+            if (tipoPago.value === 'completo') {
+                pagos = parseFloat(document.querySelector('#pago-completo input[type="number"]').value) || 0;
+            } else {
+                pagos = Array.from(document.querySelectorAll('#pago-parcial input[type="number"]'))
+                    .reduce((sum, input) => sum + (parseFloat(input.value) || 0), 0);
+            }
+
+            // Actualizar UI
+            document.getElementById('subtotal').textContent = subtotal.toFixed(2);
+            document.getElementById('descuento').textContent = descuento.toFixed(2);
+            document.getElementById('impuestos').textContent = impuestos.toFixed(2);
+            document.getElementById('total').textContent = total.toFixed(2);
+            document.getElementById('pagado').textContent = pagos.toFixed(2);
+            
+            const saldo = total - pagos;
+            document.getElementById('saldo').textContent = Math.max(saldo, 0).toFixed(2);
+
+            // Calcular cambio
+            const usandoEfectivo = tipoPago.value === 'completo' 
+                ? document.querySelector('#pago-completo select').value === 'efectivo'
+                : Array.from(document.querySelectorAll('#pago-parcial select'))
+                    .some(select => select.value === 'efectivo');
+
+            if (usandoEfectivo && pagos > total) {
+                document.getElementById('cambio').style.display = 'block';
+                document.getElementById('cambio-monto').textContent = (pagos - total).toFixed(2);
+            } else {
+                document.getElementById('cambio').style.display = 'none';
+            }
+        }
+
+        // Eventos de actualización
+        const elementosCalculo = [
+            'check_in', 'check_out', 'iva', 'ish', 'tarifa_por_noche',
+            'tipo_descuento_inapam', 'valor_descuento_inapam'
+        ];
+
+        elementosCalculo.forEach(id => {
+            const elemento = document.getElementById(id);
+            if (elemento) {
+                elemento.addEventListener('input', calcularTotales);
+                elemento.addEventListener('change', calcularTotales);
             }
         });
 
-        // Manejo del IVA
-        if ($('#aplicar_iva').is(':checked')) {
-            total *= 1.16;
-        }
-
-        // Manejo del descuento (si aplica)
-        if ($('#descuento').is(':checked')) {
-            total *= 0.9; // 10% de descuento
-        }
-    } else {
-        alert('Por favor, seleccione las fechas de check-in y check-out.');
-        return;
-    }
-
-    $('#total-pagar').text('$' + total.toFixed(2));
-    calcularCambio();
-}
-
-// Función para calcular el cambio (si aplica)
-function calcularCambio() {
-    const total = parseFloat($('#total-pagar').text().replace('$', ''));
-    const cantidadRecibida = parseFloat($('#cantidad-recibida').val());
-
-    if (!isNaN(cantidadRecibida) && !isNaN(total)) {
-        const cambio = cantidadRecibida - total;
-        $('#cambio').text('$' + cambio.toFixed(2));
-    } else {
-        $('#cambio').text('\$0.00');
-    }
-}
-
-// Evento para escuchar cambios en los checkboxes y inputs
-$('#aplicar_iva, #descuento, input[name="elementos[]"]').on('change', calcularTotal);
-$('#check_in, #check_out').on('change', calcularTotal);
-$('#cantidad-recibida').on('input', calcularCambio);
-
-// Inicializar el cálculo al cargar la página
-$(document).ready(function() {
-    calcularTotal();
-});
-   
-
-        $(document).ready(function() {
-            $('.toggle-sidebar').on('click', function() {
-                $('.sidebar').toggleClass('active');
-                $('.overlay').toggleClass('active');
-            });
-
-            $('.overlay').on('click', function() {
-                $('.sidebar').removeClass('active');
-                $('.overlay').removeClass('active');
-            });
+        document.getElementById('aplicar_descuento_inapam').addEventListener('change', calcularTotales);
+        document.addEventListener('input', function(e) {
+            if (e.target.matches('#pago-completo input, #pago-parcial input')) {
+                calcularTotales();
+            }
         });
+
+        // Inicializar cálculos
+        calcularTotales();
+
+        // Toggle del sidebar en móvil
+        const toggleButton = document.querySelector('.toggle-sidebar');
+        const sidebar = document.querySelector('.sidebar');
+        const overlay = document.querySelector('.overlay');
+
+        toggleButton.addEventListener('click', function() {
+            sidebar.classList.toggle('active');
+            overlay.classList.toggle('active');
+        });
+
+        overlay.addEventListener('click', function() {
+            sidebar.classList.remove('active');
+            overlay.classList.remove('active');
+        });
+    });
 </script>
-
 </body>
 </html>

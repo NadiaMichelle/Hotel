@@ -38,7 +38,6 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
     $id = $_POST['id'];
     $nombre = trim($_POST['nombre']);
     $descripcion = trim($_POST['descripcion']);
-    $precio = floatval($_POST['precio']);
     $tipo = $_POST['tipo'];
     $estado = $_POST['estado'];
 
@@ -50,8 +49,8 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
             $error = "El nombre del elemento ya existe para este tipo.";
         } else {
             // Actualizar el elemento
-            $stmt = $pdo->prepare('UPDATE elementos SET nombre = ?, descripcion = ?, precio = ?, tipo = ?, estado = ? WHERE id = ?');
-            if ($stmt->execute([$nombre, $descripcion, $precio, $tipo, $estado, $id])) {
+            $stmt = $pdo->prepare('UPDATE elementos SET nombre = ?, descripcion = ?, tipo = ?, estado = ? WHERE id = ?');
+            if ($stmt->execute([$nombre, $descripcion, $tipo, $estado, $id])) {
                 // Redirigir de vuelta a la página principal
                 header('Location: habitaciones.php');
                 exit;
@@ -302,10 +301,10 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
     <h2>Menú</h2>
     <ul>
         <li><a href="index.php"><i class="fas fa-home"></i> Inicio</a></li>
-        <li><a href="habitaciones.php"><i class="fas fa-bed"></i> Habitaciones y Servicios</a></li>
+        <li><a href="habitaciones.php"><i class="fas fa-bed"></i>Servicios</a></li>
         <li><a href="huespedes.php"><i class="fas fa-users"></i> Huéspedes</a></li>
-        <li><a href="Crear_Recibo.php"><i class="fas fa-pen-alt"></i> Crear Reservación</a></li>
-        <li><a href="recibos.php"><i class="fas fa-file-invoice"></i> Reservas</a></li>
+        <li><a href="Crear_Recibo.php"><i class="fas fa-pen-alt"></i> Generar Recibo</a></li>
+        <li><a href="recibos.php"><i class="fas fa-file-invoice"></i> Registro de Caja</a></li>
         <li><a href="index.php" class="logout-btn"><i class="fas fa-sign-out-alt"></i> Salir</a></li>
     </ul>
 </aside>
@@ -328,10 +327,6 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                     <textarea id="descripcion" name="descripcion"><?= htmlspecialchars($elemento['descripcion']) ?></textarea>
                 </div>
                 <div class="form-group">
-                    <label for="precio">Precio:</label>
-                    <input type="number" id="precio" name="precio" step="0.01" min="0" value="<?= $elemento['precio'] ?>" required>
-                </div>
-                <div class="form-group">
                     <label for="tipo">Tipo:</label>
                     <select id="tipo" name="tipo" required>
                         <option value="habitacion" <?php if ($elemento['tipo'] == 'habitacion') echo 'selected'; ?>>Habitación</option>
@@ -343,8 +338,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                     <select id="estado" name="estado" required>
                         <option value="disponible" <?php if ($elemento['estado'] == 'disponible') echo 'selected'; ?>>Disponible</option>
                         <option value="ocupada" <?php if ($elemento['estado'] == 'ocupada') echo 'selected'; ?>>Ocupada</option>
-                        <option value="activo" <?php if ($elemento['estado'] == 'activo') echo 'selected'; ?>>Activo</option>
-                        <option value="inactivo" <?php if ($elemento['estado'] == 'inactivo') echo 'selected'; ?>>Inactivo</option>
+                        <option value="Mantenimiento" <?php if ($elemento['estado'] == 'Mantenimiento') echo 'selected'; ?>>Mantenimiento</option>
                     </select>
                 </div>
                 <button type="submit" class="btn btn-primary">Guardar Cambios</button>

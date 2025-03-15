@@ -1,28 +1,48 @@
 <?php
 session_start();
 require 'config.php';
+// Verificar si el usuario ha iniciado sesión
+if (!isset($_SESSION['usuario_id'])) {
+    header('Location: login.php');
+    exit;
+}
 
+// Obtener el rol y el nombre del usuario desde la sesión
+$rol = $_SESSION['rol'];
+$nombre_usuario = $_SESSION['nombre_usuario'];
 // Configuración de paginación
 $registros_por_pagina = 10;
 $pagina_actual = isset($_GET['pagina']) ? (int)$_GET['pagina'] : 1;
 $inicio = ($pagina_actual > 1) ? ($pagina_actual * $registros_por_pagina) - $registros_por_pagina : 0;
 
-// Obtener datos de filtros si existen
-$check_in = isset($_GET['check_in']) ? $_GET['check_in'] : '';
-$check_out = isset($_GET['check_out']) ? $_GET['check_out'] : '';
-$huesped = isset($_GET['huesped']) ? $_GET['huesped'] : '';
-$habitacion = isset($_GET['habitacion']) ? $_GET['habitacion'] : '';
+// Obtener datos de filtros
+$check_in = $_GET['check_in'] ?? '';
+$check_out = $_GET['check_out'] ?? '';
+$huesped = $_GET['huesped'] ?? '';
+$habitacion = $_GET['habitacion'] ?? '';
 
-// Construir la consulta SQL con filtros
-$sql = "SELECT r.*, h.nombre as nombre_huesped, GROUP_CONCAT(e.nombre SEPARATOR ', ') as elementos_nombres
-        FROM recibos r 
+// Construir consulta principal
+$sql = "SELECT 
+            r.id AS recibo_id,
+            r.subtotal,
+            r.descuento,
+            r.total_pagar,
+            r.total_pagado,
+            r.saldo,
+            r.estado_pago,
+            h.nombre AS huesped_nombre,
+            GROUP_CONCAT(e.nombre SEPARATOR ', ') AS elementos,
+            SUM(dr.tarifa) AS tarifa_total,
+            (SELECT COALESCE(SUM(a.monto), 0) FROM anticipos a WHERE a.recibo_id = r.id) AS anticipo_total
+        FROM recibos r
         JOIN huespedes h ON r.id_huesped = h.id
-        LEFT JOIN detalles_reserva dr ON r.id = dr.reserva_id
-        LEFT JOIN elementos e ON dr.elemento_id = e.id
+        JOIN detalles_reserva dr ON r.id = dr.recibo_id
+        JOIN elementos e ON dr.elemento_id = e.id
         WHERE 1=1";
 
 $params = [];
 
+// Aplicar filtros
 if (!empty($check_in)) {
     $sql .= " AND r.check_in >= :check_in";
     $params[':check_in'] = $check_in;
@@ -35,48 +55,37 @@ if (!empty($check_out)) {
 
 if (!empty($huesped)) {
     $sql .= " AND h.nombre LIKE :huesped";
-    $params[':huesped'] = '%' . $huesped . '%';
+    $params[':huesped'] = "%$huesped%";
 }
 
 if (!empty($habitacion)) {
     $sql .= " AND e.nombre LIKE :habitacion";
-    $params[':habitacion'] = '%' . $habitacion . '%';
+    $params[':habitacion'] = "%$habitacion%";
 }
 
 $sql .= " GROUP BY r.id
+          ORDER BY r.id DESC
           LIMIT $inicio, $registros_por_pagina";
 
 $stmt = $pdo->prepare($sql);
 $stmt->execute($params);
-$reservaciones = $stmt->fetchAll();
+$registros = $stmt->fetchAll();
 
-// Calcular el total de registros para la paginación
-$sql_count = "SELECT COUNT(*) FROM recibos r 
-              JOIN huespedes h ON r.id_huesped = h.id
-              LEFT JOIN detalles_reserva dr ON r.id = dr.reserva_id
-              LEFT JOIN elementos e ON dr.elemento_id = e.id
-              WHERE 1=1";
+// Consulta para total de registros
+$sql_count = "SELECT COUNT(DISTINCT r.id)
+            FROM recibos r
+            JOIN huespedes h ON r.id_huesped = h.id
+            JOIN detalles_reserva dr ON r.id = dr.recibo_id
+            JOIN elementos e ON dr.elemento_id = e.id
+            WHERE 1=1";
 
-if (!empty($check_in)) {
-    $sql_count .= " AND r.check_in >= :check_in";
-}
+if (!empty($check_in)) $sql_count .= " AND r.check_in >= '$check_in'";
+if (!empty($check_out)) $sql_count .= " AND r.check_out <= '$check_out'";
+if (!empty($huesped)) $sql_count .= " AND h.nombre LIKE '%$huesped%'";
+if (!empty($habitacion)) $sql_count .= " AND e.nombre LIKE '%$habitacion%'";
 
-if (!empty($check_out)) {
-    $sql_count .= " AND r.check_out <= :check_out";
-}
-
-if (!empty($huesped)) {
-    $sql_count .= " AND h.nombre LIKE :huesped";
-}
-
-if (!empty($habitacion)) {
-    $sql_count .= " AND e.nombre LIKE :habitacion";
-}
-
-$stmt_count = $pdo->prepare($sql_count);
-$stmt_count->execute($params);
-$total_reservas = $stmt_count->fetchColumn();
-$paginas = ceil($total_reservas / $registros_por_pagina);
+$total_registros = $pdo->query($sql_count)->fetchColumn();
+$paginas = ceil($total_registros / $registros_por_pagina);
 ?>
 
 <!DOCTYPE html>
@@ -535,20 +544,23 @@ $paginas = ceil($total_reservas / $registros_por_pagina);
 <aside class="sidebar">
         <h2>Menú</h2>
         <ul>
-            <li><a href="index.php"><i class="fas fa-home"></i> Inicio</a></li>
-            <li><a href="habitaciones.php"><i class="fas fa-bed"></i> Habitaciones y Servicios</a></li>
+        <li><a href="bottom_menu.php"><i class="fas fa-home"></i> Inicio</a></li>
+        <?php if ($rol === 'admin'): ?>
+        
+            <li><a href="habitaciones.php"><i class="fas fa-bed"></i> Habitaciones</a></li>
             <li><a href="huespedes.php"><i class="fas fa-users"></i> Huéspedes</a></li>
-            <li><a href="Crear_Recibo.php"><i class="fas fa-pen-alt"></i> Crear Reservación</a></li>
-            <li><a href="recibos.php"><i class="fas fa-file-invoice"></i> Reservas</a></li>
-            <li><a href="index.php" class="logout-btn"><i class="fas fa-sign-out-alt"></i> Salir</a></li>
+        <?php endif; ?>
+        <li><a href="Crear_Recibo.php"><i class="fas fa-pen-alt"></i> Generar Recibo</a></li>
+        <li><a href="recibos.php"><i class="fas fa-file-invoice"></i> Registro de Caja</a></li>
+        <li><a href="logout.php" class="logout-btn"><i class="fas fa-sign-out-alt"></i> Salir</a></li>
         </ul>
 </aside>
 
 <div class="overlay"></div>
 <!-- Contenido Principal -->
 <main class="contenido">
-    <h1>Reservaciones</h1>
-    <h1>Lista de Reservaciones</h1>
+    <h1>Registros de Caja</h1>
+    <h1>Lista de Registros</h1>
     
     <!-- Filtros -->
     <div class="filtros">
@@ -573,51 +585,54 @@ $paginas = ceil($total_reservas / $registros_por_pagina);
         </form>
     </div>
     <div class="tabla-contenedor">
-    <table>
-        <thead>
-            <tr>
-                <th>N°</th>
-                <th>Huésped</th>
-                <th>Check-in</th>
-                <th>Check-out</th>
-                <th>Habitaciones/Servicios</th>
-                <th>Total</th>
-                <th>Estado</th>
-                <th>Acciones</th>
-            </tr>
-        </thead>
-        <tbody>
-            <?php
-            // Inicializar el contador
-            $contador = ($pagina_actual - 1) * $registros_por_pagina;
-            foreach ($reservaciones as $reserva): 
-                $contador++;
-            ?>
-            <tr>
-                <td><?= $contador ?></td>
-                <td><?= htmlspecialchars($reserva['nombre_huesped']) ?></td>
-                <td><?= date('d/m/Y', strtotime($reserva['check_in'])) ?></td>
-                <td><?= date('d/m/Y', strtotime($reserva['check_out'])) ?></td>
-                <td><?= htmlspecialchars($reserva['elementos_nombres']) ?></td>
-                <td>$<?= number_format($reserva['total_pagar'], 2) ?></td>
-                <td><?= htmlspecialchars($reserva['estado']) ?></td>
-                <td class="acciones">
-                    <a href="editar_reserva.php?id=<?= $reserva['id'] ?>" class="btn-editar">
-                        <i class="fas fa-edit"></i>
-                    </a>
-                    <a href="eliminar_reserva.php?id=<?= $reserva['id'] ?>" class="btn-eliminar" 
-                       onclick="return confirm('¿Seguro que deseas cancelar esta reservación?')">
-                        <i class="fas fa-times"></i>
-                    </a>
-                    <a href="javascript:void(0)" onclick="imprimirRecibo(<?= $reserva['id'] ?>)" class="btn-imprimir">
-                        <i class="fas fa-print"></i>
-                    </a>
-                </td>
-            </tr>
-            <?php endforeach; ?>
-        </tbody>
-    </table>
-</div>
+            <table>
+                <thead>
+                    <tr>
+                        <th>N°</th>
+                        <th>Huésped</th>
+                        <th>Elementos</th>
+                        <th>Tarifa Total</th>
+                        <th>Subtotal</th>
+                        <th>Descuento</th>
+                        <th>Total Pagar</th>
+                        <th>Anticipo</th>
+                        <th>Cambio/Restante</th>
+                        <th>Acciones</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <?php $contador = ($pagina_actual - 1) * $registros_por_pagina; ?>
+                    <?php foreach ($registros as $registro): ?>
+                    <tr>
+                        <td><?= ++$contador ?></td>
+                        <td><?= htmlspecialchars($registro['huesped_nombre']) ?></td>
+                        <td><?= htmlspecialchars($registro['elementos']) ?></td>
+                        <td>$<?= number_format($registro['tarifa_total'], 2) ?></td>
+                        <td>$<?= number_format($registro['subtotal'], 2) ?></td>
+                        <td>$<?= number_format($registro['descuento'], 2) ?></td>
+                        <td>$<?= number_format($registro['total_pagar'], 2) ?></td>
+                        <td>$<?= number_format($registro['anticipo_total'], 2) ?></td>
+                        <td>$<?= number_format($registro['saldo'], 2) ?></td>
+                       
+                        <td class="acciones">
+                            <a href="editar_reserva.php?id=<?= $registro['recibo_id'] ?>" class="btn-editar">
+                                <i class="fas fa-edit"></i>
+                            </a>
+                            <a href="eliminar_reserva.php?id=<?= $registro['recibo_id'] ?>" 
+                               class="btn-eliminar" 
+                               onclick="return confirm('¿Eliminar este recibo?')">
+                                <i class="fas fa-trash"></i>
+                            </a>
+                            <a href="javascript:imprimirRecibo(<?= $registro['recibo_id'] ?>)" 
+                               class="btn-imprimir">
+                                <i class="fas fa-print"></i>
+                            </a>
+                        </td>
+                    </tr>
+                    <?php endforeach; ?>
+                </tbody>
+            </table>
+        </div>
 
 <!-- Paginación -->
 <div class="paginacion">
@@ -639,6 +654,7 @@ $paginas = ceil($total_reservas / $registros_por_pagina);
     function imprimirRecibo(id) {
         window.open(`imprimir_recibo.php?id=${id}`, '_blank').print();
     }
+
 
     // Resetear filtros
     function resetFiltros() {

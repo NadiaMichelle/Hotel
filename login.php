@@ -6,23 +6,43 @@ require 'config.php';
 $error = ''; // Para capturar errores
 
 if ($_SERVER['REQUEST_METHOD'] == 'POST') {
+    // Obtener y limpiar los datos del formulario
     $nombre_usuario = trim($_POST['nombre_usuario']);
     $contrasena = $_POST['contrasena'];
 
+    // Validar que los campos no estén vacíos
     if (empty($nombre_usuario) || empty($contrasena)) {
         $error = "Por favor, completa todos los campos.";
     } else {
-        $stmt = $pdo->prepare('SELECT id, contrasena, rol FROM usuarios WHERE nombre_usuario = ?');
-        $stmt->execute([$nombre_usuario]);
-        $usuario = $stmt->fetch();
+        try {
+            // Preparar la consulta para prevenir inyecciones SQL
+            $stmt = $pdo->prepare('SELECT id, contrasena, rol, nombre_usuario FROM usuarios WHERE nombre_usuario = ?');
+            $stmt->execute([$nombre_usuario]);
+            $usuario = $stmt->fetch();
 
-        if ($usuario && password_verify($contrasena, $usuario['contrasena'])) {
-            $_SESSION['usuario_id'] = $usuario['id'];
-            $_SESSION['rol'] = $usuario['rol'];
-            header('Location: index.php');
-            exit;
-        } else {
-            $error = "Nombre de usuario o contraseña incorrectos.";
+            // Verificar si el usuario existe y si la contraseña es correcta
+            if ($usuario && password_verify($contrasena, $usuario['contrasena'])) {
+                // Iniciar sesión
+                $_SESSION['usuario_id'] = $usuario['id'];
+                $_SESSION['rol'] = $usuario['rol'];
+                $_SESSION['nombre_usuario'] = $usuario['nombre_usuario']; // Establecer nombre de usuario
+
+                // Redirigir según el rol
+                if ($usuario['rol'] === 'admin') {
+                    header('Location: index.php');
+                    exit;
+                } elseif ($usuario['rol'] === 'usuario') {
+                    header('Location: bottom_menu.php'); // Cambiar a index.php o la página principal del usuario
+                    exit;
+                } else {
+                    $error = "Rol de usuario no reconocido.";
+                }
+            } else {
+                $error = "Nombre de usuario o contraseña incorrectos.";
+            }
+        } catch (PDOException $e) {
+            // Manejo de errores de la base de datos
+            $error = "Error en la base de datos: " . $e->getMessage();
         }
     }
 }
@@ -32,7 +52,6 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
 <html lang="es">
 <head>
     <meta charset="UTF-8">
-    <meta http-equiv="X-UA-Compatible" content="IE=edge">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Iniciar Sesión</title>
     <!-- Fuente de Google Fonts -->
@@ -79,6 +98,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
 
         .form-group {
             margin-bottom: 20px;
+            position: relative;
         }
 
         label {
@@ -88,10 +108,16 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
             font-weight: 500;
         }
 
-        input[type="text"],
-        input[type="password"] {
+        .form-group i {
+            position: absolute;
+            top: 35px;
+            left: 15px;
+            color: var(--light-gray);
+        }
+
+        input[type="text"], input[type="password"] {
             width: 100%;
-            padding: 12px 15px;
+            padding: 12px 15px 12px 40px;
             border: 1px solid var(--light-gray);
             border-radius: 5px;
             box-sizing: border-box;
@@ -99,8 +125,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
             transition: border-color 0.3s;
         }
 
-        input[type="text"]:focus,
-        input[type="password"]:focus {
+        input[type="text"]:focus, input[type="password"]:focus {
             border-color: var(--primary-color);
         }
 

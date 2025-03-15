@@ -306,8 +306,8 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
       <li><a href="index.php"><i class="fas fa-home"></i> Inicio</a></li>
       <li><a href="habitaciones.php"><i class="fas fa-bed"></i> Habitaciones y Servicios</a></li>
       <li><a href="huespedes.php"><i class="fas fa-users"></i> Huéspedes</a></li>
-      <li><a href="Crear_Recibo.php"><i class="fas fa-pen-alt"></i> Crear reservas</a></li>
-      <li><a href="recibos.php"><i class="fas fa-file-invoice"></i> Reservas</a></li>
+      <li><a href="Crear_Recibo.php"><i class="fas fa-pen-alt"></i> Generar Recibo</a></li>
+      <li><a href="recibos.php"><i class="fas fa-file-invoice"></i> Registros de Caja</a></li>
       <li><a href="index.php" class="logout-btn"><i class="fas fa-sign-out-alt"></i> Salir</a></li>
     </ul>
   </aside>

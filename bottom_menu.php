@@ -1,5 +1,5 @@
 <?php
-// Index.php Admin
+// bottom-menu.php
 session_start();
 require 'config.php';
 
@@ -13,7 +13,6 @@ if (!isset($_SESSION['usuario_id'])) {
 $rol = $_SESSION['rol'];
 $nombre_usuario = $_SESSION['nombre_usuario']; // Asegúrate de que esta variable esté establecida en el inicio de sesión
 ?>
-
 <!DOCTYPE html>
 <html lang="es">
 <head>
@@ -22,9 +21,9 @@ $nombre_usuario = $_SESSION['nombre_usuario']; // Asegúrate de que esta variabl
     <title>Sistema Hotel Puesta del Sol</title>
     <link rel="icon" type="image/png" sizes="32x32" href="logo_hotel.jpg">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
-    
     <style>
-  :root {
+  /* Variables de color */
+:root {
     --color-primary: #2c3e50;
     --color-secondary: #2ecc71;
     --color-accent: #e74c3c;
@@ -60,7 +59,7 @@ body {
 
 /* Aplicación de la animación al fondo */
 .content, .welcome-box {
-    background: linear-gradient(-45deg, #ff9a9e, #fad0c4, #fad0c4, #a18cd1);
+    background: linear-gradient(-45deg, #ff9a9e,rgb(36, 159, 199),rgb(197, 197, 197),rgb(238, 154, 85));
     background-size: 400% 400%;
     animation: gradient-animation 15s ease infinite;
 }
@@ -272,12 +271,14 @@ body {
         max-width: 95%;
     }
 }
-</style>
+
+    </style>
 </head>
 <body>
-<main class="content">
     <!-- Contenido principal (Bienvenida) -->
-    <div class="welcome-box">
+    <main class="content">
+    
+        <div class="welcome-box">
             <div class="text">
                 <h1>Bienvenido  <?php echo htmlspecialchars($nombre_usuario); ?> al <span class="highlight">Sistema Hotel Puesta del Sol</span></h1>
                 <p>Gestión de habitaciones, huéspedes, servicios y reservaciones</p>
@@ -286,16 +287,15 @@ body {
         </div>
     </main>
 
-    <!-- Menú abajo (fijo en la parte inferior) -->
-    <nav class="bottom-menu">
-        <ul>
+<!-- Menú abajo (fijo en la parte inferior) -->
+<nav class="bottom-menu">
+    <ul>
+        <?php if ($rol === 'admin'): ?>
             <li><a href="habitaciones.php"><i class="fas fa-bed"></i> Habitaciones</a></li>
             <li><a href="huespedes.php"><i class="fas fa-users"></i> Huéspedes</a></li>
-            <li><a href="Crear_Recibo.php"><i class="fas fa-pen-alt"></i> Generar Recibo</a></li>
-            <li><a href="recibos.php"><i class="fas fa-file-invoice"></i> Registro de Caja</a></li>
-            <li><a href="logout.php" class="logout-btn"><i class="fas fa-sign-out-alt"></i> Salir</a></li>
-        </ul>
-    </nav>
-
-</body>
-</html
+        <?php endif; ?>
+        <li><a href="Crear_Recibo.php"><i class="fas fa-pen-alt"></i> Generar Recibo</a></li>
+        <li><a href="recibos.php"><i class="fas fa-file-invoice"></i> Registro de Caja</a></li>
+        <li><a href="logout.php" class="logout-btn"><i class="fas fa-sign-out-alt"></i> Salir</a></li>
+    </ul>
+</nav>

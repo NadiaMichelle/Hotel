@@ -1,5 +1,5 @@
 <?php
-// actualizar_estado.php
+// actualizar_estado  .php
 require 'config.php';
 
 try {

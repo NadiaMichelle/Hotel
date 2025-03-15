@@ -59,7 +59,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
         try {
             $id = intval($_POST['id']);
             // Verificar si hay reservas asociadas
-            $stmt = $pdo->prepare('SELECT COUNT(*) FROM detalles_reserva WHERE habitaciones_id = ?');
+            $stmt = $pdo->prepare('SELECT COUNT(*) FROM detalles_reserva WHERE elemento_id = ?');
             $stmt->execute([$id]);
             $count = $stmt->fetchColumn();
 
@@ -71,7 +71,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                 if ($stmt->execute([$id])) {
                     $response['success'] = true;
                     // Recargar elementos
-                    $stmt = $pdo->query('SELECT id, codigo, nombre, descripcion, precio, tipo, estado, creado_at, updated_at FROM elementos');
+                    $stmt = $pdo->query('SELECT id, codigo, nombre, descripcion, tipo, estado, creado_at, updated_at FROM elementos');
                     $elementos = $stmt->fetchAll(PDO::FETCH_ASSOC);
                     $response['elementos'] = $elementos;
                 } else {
@@ -96,7 +96,6 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                 $estado = $_POST['estado'] ?? $elemento['estado'];
                 $nombre = trim($_POST['nombre'] ?? $elemento['nombre']);
                 $descripcion = trim($_POST['descripcion'] ?? $elemento['descripcion']);
-                $precio = floatval($_POST['precio'] ?? $elemento['precio']);
                 $tipo = $_POST['tipo'] ?? $elemento['tipo'];
 
                 // Validar que el nombre y tipo no se dupliquen
@@ -106,11 +105,11 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                     $response['error'] = "El nombre del elemento ya existe para este tipo.";
                 } else {
                     // Actualizar el elemento
-                    $stmt = $pdo->prepare('UPDATE elementos SET nombre = ?, descripcion = ?, precio = ?, tipo = ?, estado = ? WHERE id = ?');
-                    if ($stmt->execute([$nombre, $descripcion, $precio, $tipo, $estado, $id])) {
+                    $stmt = $pdo->prepare('UPDATE elementos SET nombre = ?, descripcion = ?, tipo = ?, estado = ? WHERE id = ?');
+                    if ($stmt->execute([$nombre, $descripcion, $tipo, $estado, $id])) {
                         $response['success'] = true;
                         // Recargar elementos
-                        $stmt = $pdo->query('SELECT id, codigo, nombre, descripcion, precio, tipo, estado, creado_at, updated_at FROM elementos');
+                        $stmt = $pdo->query('SELECT id, codigo, nombre, descripcion, tipo, estado, created_at, updated_at FROM elementos');
                         $elementos = $stmt->fetchAll(PDO::FETCH_ASSOC);
                         $response['elementos'] = $elementos;
                     } else {
@@ -131,7 +130,6 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
 
             if ($tipo == 'habitacion') {
                 $nombre = trim($_POST['numero_habitacion']);
-                $precio = floatval($_POST['precio']);
                 $descripcion = trim($_POST['descripcion']);
                 $estado = $_POST['estado'] ?? 'disponible'; // Valor predeterminado para habitaciones
 
@@ -150,11 +148,11 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                     $codigo = 'H' . str_pad($numero, 4, '0', STR_PAD_LEFT);
 
                     // Insertar la nueva habitación
-                    $stmt = $pdo->prepare('INSERT INTO elementos (codigo, nombre, descripcion, precio, tipo, estado) VALUES (?, ?, ?, ?, ?, ?)');
-                    if ($stmt->execute([$codigo, $nombre, $descripcion, $precio, $tipo, $estado])) {
+                    $stmt = $pdo->prepare('INSERT INTO elementos (codigo, nombre, descripcion, tipo, estado) VALUES (?, ?, ?, ?, ?)');
+                    if ($stmt->execute([$codigo, $nombre, $descripcion, $tipo, $estado])) {
                         $response['success'] = true;
                         // Recargar elementos
-                        $stmt = $pdo->query('SELECT id, codigo, nombre, descripcion, precio, tipo, estado, creado_at, updated_at FROM elementos');
+                        $stmt = $pdo->query('SELECT id, codigo, nombre, descripcion, tipo, estado, created_at, updated_at FROM elementos');
                         $elementos = $stmt->fetchAll(PDO::FETCH_ASSOC);
                         $response['elementos'] = $elementos;
                     }
@@ -162,7 +160,6 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
             } elseif ($tipo == 'servicio') {
                 $nombre = trim($_POST['nombre_servicio']);
                 $descripcion = trim($_POST['descripcion']);
-                $precio = floatval($_POST['precio']);
                 $estado = 'activo'; // Valor predeterminado para servicios
 
                 // Verificar si el servicio ya existe
@@ -180,11 +177,11 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                     $codigo = 'S' . str_pad($numero, 4, '0', STR_PAD_LEFT);
 
                     // Insertar el nuevo servicio
-                    $stmt = $pdo->prepare('INSERT INTO elementos (codigo, nombre, descripcion, precio, tipo, estado) VALUES (?, ?, ?, ?, ?, ?)');
-                    if ($stmt->execute([$codigo, $nombre, $descripcion, $precio, $tipo, $estado])) {
+                    $stmt = $pdo->prepare('INSERT INTO elementos (codigo, nombre, descripcion, tipo, estado) VALUES (?, ?, ?, ?, ?)');
+                    if ($stmt->execute([$codigo, $nombre, $descripcion, $tipo, $estado])) {
                         $response['success'] = true;
                         // Recargar elementos
-                        $stmt = $pdo->query('SELECT id, codigo, nombre, descripcion, precio, tipo, estado, creado_at, updated_at FROM elementos');
+                        $stmt = $pdo->query('SELECT id, codigo, nombre, descripcion, tipo, estado, created_at, updated_at FROM elementos');
                         $elementos = $stmt->fetchAll(PDO::FETCH_ASSOC);
                         $response['elementos'] = $elementos;
                     }
@@ -209,8 +206,6 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
     <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
     <link rel="icon" type="image/png" sizes="32x32" href="logo_hotel.jpg">
     <style>
-/* Estilos para hacer la tabla scrollable */
-         
         /* Estilos generales */
         :root {
             --color-primary: #2c3e50;
@@ -240,58 +235,58 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
         }
         /* Sidebar */
         .sidebar {
-    position: fixed; /* Fija la barra lateral en una posición específica */
-    top: 0;          /* Posición desde la parte superior */
-    left: 0;         /* Posición desde la izquierda */
-    width: 250px;
-    height: 100vh;   /* Asegura que la barra lateral ocupe toda la altura de la ventana */
-    background-color: var(--color-primary);
-    color: white;
-    padding: 20px;
-    box-sizing: border-box;
-    display: flex;
-    flex-direction: column;
-    /* Elimina la propiedad 'transition' si no necesitas que la barra lateral tenga una transición */
-    /* transition: left 0.3s ease; */
-    overflow: hidden; /* Asegura que no haya desplazamiento dentro de la barra lateral */
-    z-index: 1000;   /* Asegura que la barra lateral esté por encima de otros elementos */
-}
+            position: fixed; /* Fija la barra lateral en una posición específica */
+            top: 0;          /* Posición desde la parte superior */
+            left: 0;         /* Posición desde la izquierda */
+            width: 250px;
+            height: 100vh;   /* Asegura que la barra lateral ocupe toda la altura de la ventana */
+            background-color: var(--color-primary);
+            color: white;
+            padding: 20px;
+            box-sizing: border-box;
+            display: flex;
+            flex-direction: column;
+            /* Elimina la propiedad 'transition' si no necesitas que la barra lateral tenga una transición */
+            /* transition: left 0.3s ease; */
+            overflow: hidden; /* Asegura que no haya desplazamiento dentro de la barra lateral */
+            z-index: 1000;   /* Asegura que la barra lateral esté por encima de otros elementos */
+        }
 
-.sidebar h2 {
-    text-align: center;
-    margin-bottom: 30px;
-    font-size: 1.5em;
-}
+        .sidebar h2 {
+            text-align: center;
+            margin-bottom: 30px;
+            font-size: 1.5em;
+        }
 
-.sidebar ul {
-    list-style: none;
-    padding: 0;
-    margin: 0;
-}
+        .sidebar ul {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+        }
 
-.sidebar ul li {
-    margin: 20px 0;
-}
+        .sidebar ul li {
+            margin: 20px 0;
+        }
 
-.sidebar ul li a {
-    color: white;
-    text-decoration: none;
-    display: flex;
-    align-items: center;
-    font-size: 1.1em;
-    padding: 10px;
-    border-radius: 4px;
-    transition: background-color 0.3s;
-}
+        .sidebar ul li a {
+            color: white;
+            text-decoration: none;
+            display: flex;
+            align-items: center;
+            font-size: 1.1em;
+            padding: 10px;
+            border-radius: 4px;
+            transition: background-color 0.3s;
+        }
 
-.sidebar ul li a i {
-    margin-right: 10px;
-    font-size: 1.2em;
-}
+        .sidebar ul li a i {
+            margin-right: 10px;
+            font-size: 1.2em;
+        }
 
-.sidebar ul li a:hover {
-    background-color: rgba(255, 255, 255, 0.2);
-}
+        .sidebar ul li a:hover {
+            background-color: rgba(255, 255, 255, 0.2);
+        }
         /* Contenido principal */
         .content {
             flex-grow: 1;
@@ -409,7 +404,8 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
         }
         .notificacion.success { background-color: #2ecc71; }
         .notificacion.error { background-color: #e74c3c; }
-                .tabla-scroll {
+        /* Estilos para la tabla */
+        .tabla-scroll {
             width: 100%;
             max-height: 500px; /* Establece una altura máxima para el contenedor */
             overflow-x: auto;   /* Habilita el desplazamiento horizontal */
@@ -445,7 +441,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
         .tabla-scroll tr:nth-child(even) {
             background-color: #f8f9fa;
         }
-                /* Estilos adicionales para los botones de acciones */
+        /* Estilos adicionales para los botones de acciones */
         .botones-acciones {
             display: flex;
             gap: 5px;
@@ -477,118 +473,106 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
         .botones-acciones button:hover {
             opacity: 0.9;
         }
-        
-        .habitaciones-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-            gap: 1rem;
-            padding: 1rem;
+        /* Estilos para la tabla */
+        .tabla-scroll {
+            width: 100%;
+            max-height: 500px;
             overflow-y: auto;
-            max-height: 400px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
         }
 
-        .habitacion-item {
-            padding: 1rem;
-            border: 2px solid var(--color-borde);
-            border-radius: 0.5rem;
-            cursor: pointer;
-            transition: all 0.2s ease;
-            background: white;
+        .tabla-scroll table {
+            width: 100%;
+            border-collapse: collapse;
+            min-width: 800px;
+        }
+
+        .tabla-scroll th, 
+        .tabla-scroll td {
+            padding: 12px 15px;
+            border-bottom: 1px solid #eee;
+            text-align: center;
+        }
+
+        .tabla-scroll th {
+            background: var(--color-primary);
+            color: var(--color-letters);
+            position: sticky;
+            top: 0;
+            z-index: 2;
+        }
+
+        .tabla-scroll tr:nth-child(even) {
+            background-color: #f8f9fa;
+        }
+        /* Estilos adicionales para los botones de acciones */
+        .botones-acciones {
             display: flex;
-            flex-direction: column;
-            justify-content: space-between;
+            gap: 5px;
         }
 
-        .habitacion-item:hover {
-            transform: translateY(-3px);
-            box-shadow: 0 3px 10px rgba(0,0,0,0.1);
-            border-color: var(--color-secundario);
-        }
-
-        .habitacion-item label {
-            display: flex;
-            flex-direction: column;
-            gap: 0.5rem;
-            cursor: pointer;
-        }
-
-        .icono {
-            font-size: 2rem;
-            color: var(--color-primario);
-            margin-bottom: 0.5rem;
-        }
-
-        .detalles {
-            display: flex;
-            flex-direction: column;
-        }
-
-        .nombre {
-            font-size: 1.1rem;
-            font-weight: bold;
-            color: var(--color-primario);
-        }
-
-        .precio {
-            font-size: 1rem;
-            color: var(--color-secundario);
-            margin-bottom: 0.5rem;
-        }
-
-        .descripcion {
+        .botones-acciones a, 
+        .botones-acciones button {
+            text-decoration: none;
+            padding: 8px 12px;
+            border: none;
+            border-radius: 5px;
+            color: var(--color-white);
             font-size: 0.9rem;
-            color: #555;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
         }
-                /* Responsive Design */
-        @media (max-width: 768px) {
-            .tabla-scroll {
-                /* No es necesario ajustar aquí, ya que el contenedor ya tiene overflow-x: auto */
-            }
 
-            .tabla-scroll table {
-                min-width: 600px; /* Ajusta según sea necesario */
-            }
+        .botones-acciones a {
+            background: #3498db;
         }
-        @media (max-width: 768px) {
-      .sidebar {
-        position: fixed;
-        top: 0;
-        left: -250px; /* Oculto por defecto en móvil */
-        height: 100%;
-        z-index: 999;
-      }
-      .sidebar.active {
-        left: 0;
-      }
-      .content {
-        margin-left: 0;
-      }
-      .toggle-sidebar {
-        display: block;
-      }
-      /* Overlay opcional para enfocar el sidebar */
-      .overlay {
-        display: none;
-        position: fixed;
-        top: 0;
-        left: 0;
-        width: 100%;
-        height: 100%;
-        background: rgba(0,0,0,0.5);
-        z-index: 998;
-      }
-      .overlay.active {
-        display: block;
-      }
-    }
 
-    @media (max-width: 480px) {
-      .search-container {
-        flex-direction: column;
-        align-items: flex-start;
-      }
-    }
-    
+        .botones-acciones button {
+            background: #e74c3c;
+        }
+
+        .botones-acciones a:hover, 
+        .botones-acciones button:hover {
+            opacity: 0.9;
+        }
+        /* Estilos para la tabla */
+        .tabla-scroll {
+            width: 100%;
+            max-height: 500px;
+            overflow-y: auto;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+        }
+
+        .tabla-scroll table {
+            width: 100%;
+            border-collapse: collapse;
+            min-width: 800px;
+        }
+
+        .tabla-scroll th, 
+        .tabla-scroll td {
+            padding: 12px 15px;
+            border-bottom: 1px solid #eee;
+            text-align: center;
+        }
+
+        .tabla-scroll th {
+            background: var(--color-primary);
+            color: var(--color-letters);
+            position: sticky;
+            top: 0;
+            z-index: 2;
+        }
+
+        .tabla-scroll tr:nth-child(even) {
+            background-color: #f8f9fa;
+        }
     </style>
 </head>
 <body>
@@ -600,10 +584,10 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
         <h2>Menú</h2>
         <ul>
             <li><a href="index.php"><i class="fas fa-home"></i> Inicio</a></li>
-            <li><a href="habitaciones.php"><i class="fas fa-bed"></i> Habitaciones y Servicios</a></li>
+            <li><a href="habitaciones.php"><i class="fas fa-bed"></i> Servicios</a></li>
             <li><a href="huespedes.php"><i class="fas fa-users"></i> Huéspedes</a></li>
-            <li><a href="Crear_Recibo.php"><i class="fas fa-pen-alt"></i> Crear Reservación</a></li>
-            <li><a href="recibos.php"><i class="fas fa-file-invoice"></i> Reservas</a></li>
+            <li><a href="Crear_Recibo.php"><i class="fas fa-pen-alt"></i> Generar Recibo</a></li>
+            <li><a href="recibos.php"><i class="fas fa-file-invoice"></i> Registros de Caja</a></li>
             <li><a href="index.php" class="logout-btn"><i class="fas fa-sign-out-alt"></i> Salir</a></li>
         </ul>
     </aside>
@@ -632,24 +616,22 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                         <div class="form-group">
                             <label for="numero_habitacion_add">Número de Habitación:</label>
                             <input type="text" id="numero_habitacion_add" name="numero_habitacion" required>
-                        </div>
-                        <div class="form-group">
-                            <label for="precio_add">Precio:</label>
-                            <input type="number" id="precio_add" name="precio" step="0.01" min="0" required>
-                        </div>
-                        <div class="form-group">
-                            <label for="descripcion_add">Descripción:</label>
-                            <textarea id="descripcion_add" name="descripcion" maxlength="500"></textarea>
-                        </div>
-                        <div class="form-group">
-                            <label for="estado_add">Estado:</label>
-                            <select id="estado_add" name="estado" class="form-control">
-                                <option value="disponible">Disponible</option>
-                                <option value="ocupada">Ocupada</option>
-                            </select>
-                        </div>
-                    </div>
-
+    </div>
+                    <div class="habitacion-item">
+                    <select name="descripcion" class="Habitacion_tipo">
+                            <option value="efectivo">Habitacion Estandar</option>
+                            <option value="tarjeta_debito">Master Suite (Habitacion Cuadruple)</option>
+                            <option value="tarjeta_credito">Bungalow Chico</option>
+                            <option value="transferencia">Habitacion Sencilla</option>
+                            <option value="transferencia">Suite, KingSize y dos sofas</option>
+                            <option value="transferencia">Habitacion Sencilla</option>
+                            <option value="transferencia">Suite Jr</option>
+                            <option value="transferencia">Suite</option>
+                        </select>
+                     <button type="submit" name="agregar" class="btn btn-primary">
+                    <i class="fas fa-plus"></i> Agregar
+                </button>
+                
                     <!-- Formulario para agregar servicio -->
                     <div id="form-servicio">
                         <h2>Agregar Servicio</h2>
@@ -661,10 +643,6 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                             <label for="descripcion_add">Descripción:</label>
                             <textarea id="descripcion_add" name="descripcion" maxlength="300"></textarea>
                         </div>
-                        <div class="form-group">
-                            <label for="precio_servicio_add">Precio:</label>
-                            <input type="number" id="precio_servicio_add" name="precio" step="0.01" min="0" required>
-                        </div>
                     </div>
                 </div>
 
@@ -672,13 +650,12 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                     <i class="fas fa-plus"></i> Agregar
                 </button>
             </form>
+            </div>
         </div>
 
         <!-- Formulario de filtros y búsqueda -->
-      
         <h2>Lista de Elementos</h2>
-<div class="tabla-unificada">
-<div class="search-bar mb-4">
+        <div class="search-bar mb-4">
             <form id="filtros-form">
                 <div class="row g-3 align-items-center">
                     <div class="col-auto">
@@ -694,63 +671,58 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                             <option value="">Todos los estados</option>
                             <option value="disponible" <?= $estado === 'disponible' ? 'selected' : '' ?>>Disponible</option>
                             <option value="ocupada" <?= $estado === 'ocupada' ? 'selected' : '' ?>>Ocupada</option>
-                            <option value="activo" <?= $estado === 'activo' ? 'selected' : '' ?>>Activo</option>
-                            <option value="inactivo" <?= $estado === 'inactivo' ? 'selected' : '' ?>>Inactivo</option>
+                            <option value="inactivo" <?= $estado === 'inactivo' ? 'selected' : '' ?>>Mantenimiento</option>
                         </select>
                     </div>
                     
-                  
                     <div class="col-auto">
                         <button type="submit" class="btn btn-primary">Filtrar</button>
                     </div>
                 </div>
             </form>
         </div>
-<input type="text" id="busqueda" placeholder="Buscar..." class="form-control" style="margin-bottom: 10px;">
-    <div class="tabla-scroll">       
-        <table>
-            <thead>
+        <input type="text" id="busqueda" placeholder="Buscar..." class="form-control" style="margin-bottom: 10px;">
+        <div class="tabla-scroll">       
+            <table>
+             <thead>
                 <tr>
-                
-                    <th>Código</th>
-                    <th>Nombre</th>
-                    <th>Descripción</th>
-                    <th>Precio</th>
-                    <th>Tipo</th>
-                    <th>Estado</th>
-                    <th>Creado At</th>
-                    <th>Updated At</th>
-                    <th>Acciones</th>
-                </tr>
-            </thead>
-            <tbody id="tabla-elementos-body">
-                <?php foreach ($elementos as $e): ?>
-                <tr>
-                    <td><?= $e['codigo'] ?></td>
-                    <td><?= htmlspecialchars($e['nombre']) ?></td>
-                    <td><?= htmlspecialchars($e['descripcion']) ?></td>
-                    <td>$<?= number_format($e['precio'], 2) ?></td>
-                    <td><?= htmlspecialchars($e['tipo']) ?></td>
-                    <td><?= htmlspecialchars($e['estado']) ?></td>
-                    <td><?= htmlspecialchars($e['creado_at']) ?></td>
-                    <td><?= htmlspecialchars($e['updated_at']) ?></td>
-                    <td>
-                        <form method="post" class="form-borrar">
-                            <input type="hidden" name="id" value="<?= $e['id'] ?>">
-                            <button type="submit" name="borrar_elemento" class="boton-borrar">
-                                <i class="fas fa-trash-alt"></i> Borrar
-                            </button>
-                        </form>
-                        <a href="editar_elemento.php?id=<?= $e['id'] ?>" class="boton-editar">
-                            <i class="fas fa-edit"></i> Editar
-                        </a>
-                    </td>
-                </tr>
-                <?php endforeach; ?>
-            </tbody>
-        </table>
+                        <th>Código</th>
+                        <th>Nombre</th>
+                        <th>Descripcion</th>
+                        <th>Tipo</th>
+                        <th>Estado</th>
+                        <th>Creado At</th>
+                        <th>Updated At</th>
+                        <th>Acciones</th>
+                    </tr>
+                </thead>
+                <tbody id="tabla-elementos-body">
+                    <?php foreach ($elementos as $e): ?>
+                    <tr>
+                        <td><?= $e['codigo'] ?></td>
+                        <td><?= htmlspecialchars($e['nombre']) ?></td>
+                        <td><?= htmlspecialchars($e['descripcion']) ?></td>
+                        <td><?= htmlspecialchars($e['tipo']) ?></td>
+                        <td><?= htmlspecialchars($e['estado']) ?></td>
+                        <td><?= htmlspecialchars($e['creado_at']) ?></td>
+                        <td><?= htmlspecialchars($e['updated_at']) ?></td>
+                        <td>
+                            <form method="post" class="form-borrar">
+                                <input type="hidden" name="id" value="<?= $e['id'] ?>">
+                                <button type="submit" name="borrar_elemento" class="boton-borrar">
+                                    <i class="fas fa-trash-alt"></i> Borrar
+                                </button>
+                            </form>
+                            <a href="editar_elemento.php?id=<?= $e['id'] ?>" class="boton-editar">
+                                <i class="fas fa-edit"></i> Editar
+                            </a>
+                        </td>
+                    </tr>
+                    <?php endforeach; ?>
+                </tbody>
+            </table>
+        </div>
     </div>
-</div>
 
     <script>
     document.addEventListener("DOMContentLoaded", function() {
@@ -771,21 +743,22 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                         <label for="numero_habitacion_add">Número de Habitación:</label>
                         <input type="text" id="numero_habitacion_add" name="numero_habitacion" required>
                     </div>
-                    <div class="form-group">
-                        <label for="precio_add">Precio:</label>
-                        <input type="number" id="precio_add" name="precio" step="0.01" min="0" required>
-                    </div>
-                    <div class="form-group">
-                        <label for="descripcion_add">Descripción:</label>
-                        <textarea id="descripcion_add" name="descripcion" maxlength="500"></textarea>
-                    </div>
-                    <div class="form-group">
-                        <label for="estado_add">Estado:</label>
-                        <select id="estado_add" name="estado" class="form-control">
-                            <option value="disponible">Disponible</option>
-                            <option value="ocupada">Ocupada</option>
-                        </select>
-                    </div>
+                    <div class="habitacion-item">
+                    <select name="descripcion" class="Habitacion_tipo">
+                        <option value="Habitación Estandar">Habitacion Estandar</option>
+                        <option value="Master Suite">Master Suite (Habitacion Cuadruple)</option>
+                        <option value="Bungalow Chico">Bungalow Chico</option>
+                        <option value="Bungalow Mediano">Bungalow Mediano</option>
+                        <option value="Habitacion Sencilla">Habitacion Sencilla</option>
+                        <option value="Suite King">Suite, KingSize y dos sofás</option>
+                        <option value="Suite Jr">Suite Jr</option>
+                        <option value="Suite">Suite</option>
+                        <option value="otro">Otro</option>
+                    </select>
+  <button type="submit" name="agregar" class="btn btn-primary">
+                    <i class="fas fa-plus"></i> Agregar
+                </button>
+                    
                 `;
             } else if (tipoSeleccionado === 'servicio') {
                 contenidoCondicional.innerHTML = `
@@ -798,10 +771,9 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                         <label for="descripcion_add">Descripción:</label>
                         <textarea id="descripcion_add" name="descripcion" maxlength="300"></textarea>
                     </div>
-                    <div class="form-group">
-                        <label for="precio_servicio_add">Precio:</label>
-                        <input type="number" id="precio_servicio_add" name="precio" step="0.01" min="0" required>
-                    </div>
+                      <button type="submit" name="agregar" class="btn btn-primary">
+                    <i class="fas fa-plus"></i> Agregar
+                </button>
                 `;
             }
         }
@@ -828,7 +800,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                     formUnificado.reset();
                     mostrarNotificacion('Operación exitosa!', 'success');
                 } else {
-                    mostrarNotificacion(data.error || 'Error en la operación', 'error');
+                    mostrarNotificación(data.error || 'Error en la operación', 'error');
                 }
             })
             .catch(error => {
@@ -855,14 +827,12 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
             if (Array.isArray(elementos)) {
                 tbody.innerHTML = elementos.map(e => `
                     <tr>
-                        <td>${e.id}</td>
                         <td>${e.codigo}</td>
                         <td>${e.nombre}</td>
                         <td>${e.descripcion || ''}</td>
-                        <td>$${parseFloat(e.precio).toFixed(2)}</td>
                         <td>${e.tipo}</td>
                         <td>${e.estado}</td>
-                        <td>${e.creado_at}</td>
+                        <td>${e.created_at}</td>
                         <td>${e.updated_at}</td>
                         <td>
                             <form method="post">
@@ -897,66 +867,41 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
 
         // Función de confirmación para borrar
         function confirmarBorrado(event) {
-            if (!confirm('¿Estás seguro de querer borrar este elemento?') ){
+            if (!confirm('¿Estás seguro de querer borrar este elemento?') ){ 
                 event.preventDefault();
             }
         }
-        
+
         $(document).ready(function(){
-    $('#busqueda').on('input', function() {
-        var query = $(this).val();
-        $.ajax({
-            url: 'buscar_elementos.php',
-            method: 'GET',
-            data: { q: query },
-            success: function(data) {
-                $('#tabla-elementos-body').html(data);
-            },
-            error: function() {
-                $('#tabla-elementos-body').html('<tr><td colspan="9">Error al buscar.</td></tr>');
-            }
-        });
-    });
-});
-
-
-  // Toggle del sidebar en móvil
-     const toggleButton = document.querySelector('.toggle-sidebar');
-      const sidebar = document.querySelector('.sidebar');
-      const overlay = document.querySelector('.overlay');
-
-      toggleButton.addEventListener('click', function() {
-        sidebar.classList.toggle('active');
-        overlay.classList.toggle('active');
-      });
-
-      overlay.addEventListener('click', function() {
-        sidebar.classList.remove('active');
-        overlay.classList.remove('active');
-      });
-    
-        document.addEventListener('DOMContentLoaded', () => {
-            // Borrar elementos
-            document.querySelectorAll('.boton-borrar').forEach(btn => {
-                btn.addEventListener('click', function() {
-                    if (confirm('¿Estás seguro?') ){
-                        const formData = new FormData(this.form);
-                        fetch('habitaciones.php', {
-                            method: 'POST',
-                            body: formData
-                        })
-                        .then(response => response.json()
-                        .then(data => {
-                            if (data.success) {
-                                btn.closest('tr').remove();
-                                mostrarNotificacion('Elemento borrado', 'success');
-                            } else {
-                                mostrarNotificación(data.error, 'error');
-                            }
-                        }));
+            $('#busqueda').on('input', function() {
+                var query = $(this).val();
+                $.ajax({
+                    url: 'buscar_elementos.php',
+                    method: 'GET',
+                    data: { q: query },
+                    success: function(data) {
+                        $('#tabla-elementos-body').html(data);
+                    },
+                    error: function() {
+                        $('#tabla-elementos-body').html('<tr><td colspan="8">Error al buscar.</td></tr>');
                     }
                 });
             });
+        });
+
+        // Toggle del sidebar en móvil
+        const toggleButton = document.querySelector('.toggle-sidebar');
+        const sidebar = document.querySelector('.sidebar');
+        const overlay = document.querySelector('.overlay');
+
+        toggleButton.addEventListener('click', function() {
+            sidebar.classList.toggle('active');
+            overlay.classList.toggle('active');
+        });
+
+        overlay.addEventListener('click', function() {
+            sidebar.classList.remove('active');
+            overlay.classList.remove('active');
         });
     });
     </script>
