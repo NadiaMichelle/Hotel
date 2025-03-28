@@ -290,12 +290,41 @@ body {
 <!-- Menú abajo (fijo en la parte inferior) -->
 <nav class="bottom-menu">
     <ul>
-        <?php if ($rol === 'admin'): ?>
+    <?php if ($rol === 'admin'): ?>
             <li><a href="habitaciones.php"><i class="fas fa-bed"></i> Habitaciones</a></li>
             <li><a href="huespedes.php"><i class="fas fa-users"></i> Huéspedes</a></li>
+            <li><a href="cancelaciones.php"><i class="fas fa-tools"></i> Cancelaciones</a></li>
+        <li><a href="reportes.php"><i class="fas fa-chart-line"></i> Reportes</a></li>
+        <li><a href="configuracion.php"><i class="fas fa-cogs"></i> Configuración</a></li>
         <?php endif; ?>
         <li><a href="Crear_Recibo.php"><i class="fas fa-pen-alt"></i> Generar Recibo</a></li>
         <li><a href="recibos.php"><i class="fas fa-file-invoice"></i> Registro de Caja</a></li>
+
         <li><a href="logout.php" class="logout-btn"><i class="fas fa-sign-out-alt"></i> Salir</a></li>
     </ul>
+    </ul>
 </nav>
+<script>
+    document.addEventListener("DOMContentLoaded", function () {
+        const nombreUsuario = "<?= htmlspecialchars($nombre_usuario) ?>";
+        const mensaje = `Bienvenido al sistema Hotel Puesta del Sol, ${nombreUsuario}`;
+
+        const synth = window.speechSynthesis;
+
+        const decirMensaje = () => {
+            if (synth.speaking) return;
+
+            const utterance = new SpeechSynthesisUtterance(mensaje);
+            utterance.lang = 'es-MX'; // Español México (puedes usar 'es-ES' para España)
+            utterance.rate = 1;
+            utterance.pitch = 1;
+
+            synth.speak(utterance);
+        };
+
+        // Esperar un pequeño tiempo para que cargue todo antes de hablar
+        setTimeout(decirMensaje, 1000);
+    });
+</script>
+</body>
+</html>

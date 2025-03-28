@@ -6,6 +6,18 @@ if (!isset($_SESSION['usuario_id'])) {
     header('Location: login.php');
     exit;
 }
+// Cargar IVA e ISH desde la base de datos para mostrar en el formulario
+try {
+    $stmt = $pdo->query("SELECT iva, ish, wifi_nombre, wifi_contrasena FROM configuracion_general LIMIT 1");
+    $config = $stmt->fetch();
+    $iva_config = $config['iva'] ?? 16.00;
+    $ish_config = $config['ish'] ?? 3.00;
+    $wifi_nombre = $config['wifi_nombre'] ?? '';
+$wifi_password = $config['wifi_password'] ?? '';
+} catch (Exception $e) {
+    $iva_config = 16.00;
+    $ish_config = 3.00;
+}
 
 $rol = $_SESSION['rol'];
 $nombre_usuario = $_SESSION['nombre_usuario'];
@@ -56,9 +68,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $check_in_date = new DateTime($check_in);
         $check_out_date = new DateTime($check_out);
         
-        if ($check_in_date < $hoy) {
-            throw new Exception("No se pueden reservar fechas pasadas");
-        }
         
         if ($check_out_date <= $check_in_date) {
             throw new Exception("Check-out debe ser posterior a check-in");
@@ -72,6 +81,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $pdo->beginTransaction();
 
         try {
+
             // Manejar huésped
             $huesped_id = $_POST['huesped_id'] ?? null;
             if (empty($huesped_id)) {
@@ -225,114 +235,195 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <title>Registro de Caja</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap" rel="stylesheet">
     <style>
-   :root {
-    --color-primario: #2c3e50; /* Azul oscuro */
-    --color-secundario: #3498db; /* Azul claro */
-    --color-fondo: #f5f6fa; /* Blanco grisáceo */
-    --color-borde: #e0e0e0; /* Gris claro */
-    --color-accent: #e74c3c; /* Rojo para resaltar */
-    --color-background: #ffffff; /* Blanco puro */
-    --color-text: #333333; /* Texto oscuro */
-    --color-border: #bdc3c7; /* Gris para bordes */
-    --color-shadow: rgba(0, 0, 0, 0.1); /* Sombra suave */
-    --color-letters: #ffffff; /* Texto blanco para fondos oscuros */
+        :root {
+    --primary: #2c3e50;
+    --secondary:rgb(31, 89, 128);
+    --background: #f9fafb;
+    --card-bg: #ffffff;
+    --border: #e0e0e0;
+    --text: #333333;
+    --accent: #e74c3c;
+    --shadow: rgba(0, 0, 0, 0.08);
+    --white: #ffffff;
 }
 
 body {
-    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-    background: var(--color-fondo);
-    color: var(--color-text);
     margin: 0;
-    padding: 0;
-    display: flex;
+    font-family: 'Inter', sans-serif;
+    background: var(--background);
+    color: var(--text);
 }
 
-.contenedor {
-    width: 100%;
+.container {
     max-width: 1200px;
-    margin: 20px auto;
-    background: var(--color-background);
+    margin: auto;
+    padding: 2rem;
+    padding-left: 270px;
+}
+
+h1 {
+    text-align: center;
+    color: var(--primary);
+    margin-bottom: 2rem;
+}
+
+form {
+    background: var(--card-bg);
     padding: 2rem;
     border-radius: 1rem;
-    box-shadow: 0 0.5rem 1rem var(--color-shadow);
+    box-shadow: 0 8px 24px var(--shadow);
+    transition: all 0.3s ease;
 }
 
 .seccion {
     margin-bottom: 2rem;
-    padding: 1.5rem;
-    border-radius: 0.8rem;
-    background: #ffffff;
-    border: 1px solid var(--color-borde);
-    position: relative;
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 1.5rem;
 }
 
-.seccion::before {
-    font-family: "Font Awesome 5 Free";
-    font-weight: 900;
-    position: absolute;
-    top: 1.5rem;
-    left: 1.5rem;
-    font-size: 1.2em;
-    color: var(--color-secundario);
-}
-
-.habitaciones-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
-    gap: 1rem;
-    max-height: 400px;
-    overflow-y: auto;
-    padding: 1rem 0;
-}
-
-.habitacion-item {
-    padding: 1rem;
-    border: 2px solid var(--color-borde);
-    border-radius: 0.5rem;
-    cursor: pointer;
-    transition: all 0.2s ease;
+.seccion h2 {
+    font-size: 1.25rem;
+    color: var(--secondary);
+    margin-bottom: 1rem;
     display: flex;
     align-items: center;
 }
 
-.habitacion-item:hover {
-    border-color: var(--color-secundario);
+.seccion h2 i {
+    margin-right: 0.5rem;
 }
 
-.campo-formulario {
-    margin-bottom: 1.5rem;
+.section-icon {
+    color: var(--secondary);
+    font-size: 1.3rem;
+    margin-bottom: 0.9rem;
+    display: inline-block;
 }
 
-input, select {
-    width: 100%;
-    padding: 0.8rem;
-    border: 2px solid var(--color-borde);
+label,
+select,
+input[type="text"],
+input[type="email"],
+input[type="number"],
+input[type="date"],
+input[type="tel"] {
+    display: block;
+    width: 98%;
+    margin-top: 0.25rem;
+    margin-bottom: 1rem;
+    padding: 0.75rem;
+    border: 1px solid var(--border);
     border-radius: 0.5rem;
-    margin-top: 0.5rem;
-    transition: border-color 0.3s;
+    font-size: 1rem;
+    background-color: #fff;
+    box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.05);
+    transition: all 0.3s ease;
 }
 
-input:focus, select:focus {
-    border-color: var(--color-secundario);
+input:focus,
+select:focus {
+    border-color: var(--secondary);
     outline: none;
+    box-shadow: 0 0 0 3px rgba(52, 152, 219, 0.2);
 }
 
-button {
-    background: var(--color-secundario);
-    color: var(--color-letters);
-    padding: 1rem 2rem;
+input[readonly] {
+    background-color: #f0f0f0;
+}
+
+#elementos-grid {
+    max-height: 300px;
+    overflow-y: auto;
+    padding-right: 0.5rem;
+}
+
+/* Oculta scrollbar horizontal en caso de overflow */
+#elementos-grid::-webkit-scrollbar {
+    width: 8px;
+}
+#elementos-grid::-webkit-scrollbar-track {
+    background: #f1f1f1;
+    border-radius: 10px;
+}
+#elementos-grid::-webkit-scrollbar-thumb {
+    background: var(--secondary);
+    border-radius: 10px;
+}
+
+.habitacion-item {
+    border: 2px solid #ddd;
+    border-radius: 1rem;
+    padding: 1rem;
+    text-align: center;
+    background: white;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+    cursor: pointer;
+    transition: all 0.3s ease;
+    height: 140px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+/* Efecto visual cuando el checkbox está marcado */
+.habitacion-item input[type="checkbox"]:checked + i,
+.habitacion-item input[type="checkbox"]:checked ~ span,
+.habitacion-item input[type="checkbox"]:checked ~ br,
+.habitacion-item input[type="checkbox"]:checked ~ * {
+    color: var(--secondary);
+}
+
+/* Ocultar el checkbox y usar solo el efecto visual */
+.habitacion-item input[type="checkbox"] {
+    display: none;
+}
+
+/* Mostrar ícono grande y centrado */
+.habitacion-item i {
+    font-size: 2rem;
+    display: block;
+    margin-bottom: 0.5rem;
+    color: #888;
+    transition: color 0.3s;
+}
+
+/* Nombre y descripción */
+.habitacion-item span.descripcion {
+    display: block;
+    font-size: 0.9rem;
+    color: #666;
+}
+
+/* Mostrar como cuadrícula */
+.habitaciones-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 1rem;
+}
+
+
+button[type="submit"],
+button[type="button"] {
+    background-color: var(--secondary);
+    color: #fff;
+    padding: 0.75rem 1.5rem;
     border: none;
     border-radius: 0.5rem;
+    font-size: 1rem;
+    font-weight: 600;
+    letter-spacing: 0.5px;
     cursor: pointer;
-    margin-top: 1rem;
-    transition: background 0.3s;
+    transition: background-color 0.3s ease, transform 0.2s ease;
+    box-shadow: 0 4px 14px var(--shadow);
 }
 
 button:hover {
-    background: #2980b9;
+    background-color: #2980b9;
+    transform: translateY(-2px);
 }
 
 .sidebar {
@@ -341,26 +432,24 @@ button:hover {
     left: 0;
     width: 250px;
     height: 100vh;
-    background-color: var(--color-primario);
-    color: var(--color-letters);
+    background-color: var(--primary);
+    color: var(--white);
     padding: 20px;
     box-sizing: border-box;
     display: flex;
     flex-direction: column;
-    overflow: hidden;
     z-index: 1000;
+    transition: left 0.3s ease;
 }
 
 .sidebar h2 {
     text-align: center;
     margin-bottom: 30px;
-    font-size: 1.5em;
 }
 
 .sidebar ul {
     list-style: none;
     padding: 0;
-    margin: 0;
 }
 
 .sidebar ul li {
@@ -368,11 +457,11 @@ button:hover {
 }
 
 .sidebar ul li a {
-    color: var(--color-letters);
+    color: var(--white);
     text-decoration: none;
     display: flex;
     align-items: center;
-    font-size: 1.1em;
+    font-size: 1.1rem;
     padding: 10px;
     border-radius: 4px;
     transition: background-color 0.3s;
@@ -380,7 +469,6 @@ button:hover {
 
 .sidebar ul li a i {
     margin-right: 10px;
-    font-size: 1.2em;
 }
 
 .sidebar ul li a:hover {
@@ -390,14 +478,14 @@ button:hover {
 .toggle-sidebar {
     display: none;
     position: fixed;
-    top: 1px;
+    top: 10px;
     left: 15px;
-    background: var(--color-primario);
-    color: var(--color-letters);
+    background: var(--primary);
+    color: var(--white);
     border: none;
     padding: 10px;
     border-radius: 4px;
-    z-index: 1000;
+    z-index: 1100;
 }
 
 .overlay {
@@ -407,24 +495,23 @@ button:hover {
     left: 0;
     width: 100%;
     height: 100%;
-    background: rgba(0,0,0,0.5);
-    z-index: 998;
+    background: rgba(0, 0, 0, 0.5);
+    z-index: 999;
 }
 
-.contenido {
-    margin-left: 250px;
-    padding: 30px;
-    transition: margin 0.3s;
+#seccion-totales div {
+    font-size: 1.05rem;
+    padding: 0.25rem 0;
 }
 
+/* Responsive */
 @media (max-width: 768px) {
+    .container {
+        padding-left: 1rem;
+    }
+
     .sidebar {
-        position: fixed;
-        top: 0;
         left: -250px;
-        height: 100%;
-        z-index: 999;
-        transition: left 0.3s ease;
     }
 
     .sidebar.active {
@@ -435,74 +522,61 @@ button:hover {
         display: block;
     }
 
-    .overlay {
-        display: none;
-        position: fixed;
-        top: 0;
-        left: 0;
-        width: 100%;
-        height: 100%;
-        background: rgba(0,0,0,0.5);
-        z-index: 998;
-        transition: display 0.3s ease;
-    }
-
     .overlay.active {
         display: block;
     }
-
-    .contenido {
-        margin-left: 0;
-        padding: 20px;
-        padding-top: 60px;
-    }
+}
+.busqueda-elementos input {
+    width: 95%;
+    padding: 0.75rem 1rem;
+    font-size: 1rem;
+    border: 1px solid var(--border);
+    border-radius: 0.5rem;
+    box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.05);
+    transition: all 0.3s ease;
 }
 
-@media (max-width: 480px) {
-    .contenido {
-        padding: 15px;
-        padding-top: 60px;
-    }
-
-    h1 {
-        font-size: 1.5rem;
-        margin-bottom: 20px;
-    }
-
-    .sidebar ul li {
-        padding: 12px 15px;
-    }
-
-    .sidebar h2 {
-        font-size: 1.3rem;
-    }
+.busqueda-elementos input:focus {
+    outline: none;
+    border-color: var(--secondary);
+    box-shadow: 0 0 0 3px rgba(52, 152, 219, 0.2);
 }
+h2 i {
+    margin-right: 0.5rem;
+    color: var(--secondary);
+}
+
+
 </style>
 </head>
 <body>
-    
-<button class="toggle-sidebar d-md-none"><i class="fas fa-bars"></i></button>
-
-<aside class="sidebar">
+<button class="toggle-sidebar"><i class="fas fa-bars"></i></button>
+ <aside class="sidebar">
     <h2><i class="fas fa-columns"></i> Menú</h2>
     <ul>
     <li><a href="bottom_menu.php"><i class="fas fa-home"></i> Inicio</a></li>
         <?php if ($rol === 'admin'): ?>
-            <li><a href="bottom_menu.php"><i class="fas fa-home"></i> Inicio</a></li>
             <li><a href="habitaciones.php"><i class="fas fa-bed"></i> Habitaciones</a></li>
             <li><a href="huespedes.php"><i class="fas fa-users"></i> Huéspedes</a></li>
         <?php endif; ?>
         <li><a href="Crear_Recibo.php"><i class="fas fa-pen-alt"></i> Generar Recibo</a></li>
         <li><a href="recibos.php"><i class="fas fa-file-invoice"></i> Registro de Caja</a></li>
+        <li><a href="cancelaciones.php"><i class="fas fa-tools"></i> Cancelaciones</a></li>
+        <li><a href="configuracion.php"><i class="fas fa-cogs"></i> Configuración</a></li>
         <li><a href="logout.php" class="logout-btn"><i class="fas fa-sign-out-alt"></i> Salir</a></li>
     </ul>
 </aside>
 <div class="overlay"></div>
-<div class="contenedor">
+<div class="container">
     <h1><i class="fas fa-archive"></i> Sistema de Registros</h1>
     <form id="reservaForm" method="post" novalidate>
         <!-- Sección Elementos -->
+        <h2><i class="fas fa-bed"></i> Habitaciones</h2>
         <div class="seccion" id="seccion-elementos">
+        <div class="busqueda-elementos" style="margin-bottom: 1rem;">
+    <input type="text" id="buscadorElementos" placeholder="Buscar habitación o servicio..." />
+</div>
+
             <div class="habitaciones-grid" id="elementos-grid">
                 <?php 
                 // Consulta SQL con filtro (por ejemplo, solo elementos disponibles)
@@ -510,23 +584,23 @@ button:hover {
                 $stmt = $pdo->query($sql);
                 while ($elemento = $stmt->fetch()):
                 ?>
-                <div class="habitacion-item">
+              <div class="habitacion-item">
                     <label>
                         <input type="checkbox" name="elementos[]" value="<?= htmlspecialchars($elemento['id']) ?>">
                         <?php
-                        // Determinar el icono según el tipo de elemento
                         $tipo = htmlspecialchars($elemento['tipo']);
                         if ($tipo === 'habitacion') {
-                            echo '<i class="fas fa-bed"></i> ';
+                            echo '<i class="fas fa-bed"></i>';
                         } elseif ($tipo === 'servicio') {
-                            echo '<i class="fas fa-concierge-bell"></i> ';
+                            echo '<i class="fas fa-concierge-bell"></i>';
                         } else {
-                            echo '<i class="fas fa-question-circle"></i> ';
+                            echo '<i class="fas fa-question-circle"></i>';
                         }
                         ?>
-                        <?= htmlspecialchars($elemento['nombre']) ?>
-                        <br>
+                        <span><?= htmlspecialchars($elemento['nombre']) ?></span><br>
                         <span class="descripcion"><?= htmlspecialchars($elemento['descripcion']) ?></span>
+                        <span><?= htmlspecialchars($elemento['precio']) ?></span><br>
+
                     </label>
                 </div>
                 <?php endwhile; ?>
@@ -535,7 +609,7 @@ button:hover {
 
         <!-- Sección Huésped -->
         <div class="seccion" id="seccion-huesped">
-            <i class="fas fa-user section-icon"></i>
+            <i class="fas fa-user section-icon"> Huesped </i>
             <select id="huesped_id" name="huesped_id">
                 <option value="">Nuevo huésped</option>
                 <?php 
@@ -555,7 +629,7 @@ button:hover {
 
         <!-- Sección Fechas -->
         <div class="seccion" id="seccion-fechas">
-            <i class="fas fa-calendar-alt section-icon"></i>
+            <i class="fas fa-calendar-alt section-icon"> Fechas </i>
             <div class="campo-formulario">
                 <label>Check-in:</label>
                 <input type="date" name="check_in" required>
@@ -565,28 +639,49 @@ button:hover {
                 <input type="date" name="check_out" required>
             </div>
         </div>
-        <i class="fas fa-couch section-icon"></i>
+        <i class="fas fa-couch section-icon"> TARIFA </i>
             <div class="campo-formulario">
                 <label>Tarifa por noche:</label>
                 <input type="number" id="tarifa_por_noche" name="tarifa_por_noche" 
                     step="0.01" min="0" required placeholder="Ingrese tarifa">
             </div>
-        <!-- Sección Impuestos -->
-        <div class="seccion" id="seccion-impuestos">
-            <i class="fas fa-percent section-icon"></i>
-            <div class="campo-formulario">
-                <label>IVA (%):</label>
-                <input type="number" id="iva" name="iva" step="0.01" min="0" max="100" value="16" required>
-            </div>
-            <div class="campo-formulario">
-                <label>ISH (%):</label>
-                <input type="number" id="ish" name="ish" step="0.01" min="0" max="100" value="3" required>
-            </div>
-        </div>
+
+
+        <?php if ($rol === 'admin'): ?>
+<div class="seccion" id="seccion-impuestos">
+    <i class="fas fa-percent section-icon">  Impuestos </i>
+    <div class="campo-formulario">
+        <label>IVA (%):</label>
+        <input type="number" id="iva" name="iva" step="0.01" min="0" max="100" value="<?= $iva_config ?>" required>
+    </div>
+    <div class="campo-formulario">
+        <label>ISH (%):</label>
+        <input type="number" id="ish" name="ish" step="0.01" min="0" max="100" value="<?= $ish_config ?>" required>
+    </div>
+</div>
+<?php else: ?>
+<!-- Usuario no admin: usa campos ocultos con valores por defecto -->
+<input type="hidden" id="iva" name="iva" value="<?= $iva_config ?>">
+<input type="hidden" id="ish" name="ish" value="<?= $ish_config ?>">
+
+<!-- Mostrar visualmente pero sin permitir editar -->
+<div class="seccion" id="seccion-impuestos">
+    <i class="fas fa-percent section-icon"></i>
+    <div class="campo-formulario">
+        <label>IVA (%):</label>
+        <input type="text" value="<?= $iva_config ?>" readonly>
+    </div>
+    <div class="campo-formulario">
+        <label>ISH (%):</label>
+        <input type="text" value="<?= $ish_config ?>" readonly>
+    </div>
+</div>
+<?php endif; ?>
+
 
         <!-- Sección Descuentos -->
         <div class="seccion" id="seccion-descuentos">
-            <i class="fas fa-tags section-icon"></i>
+            <i class="fas fa-tags section-icon">  Descuentos </i>
             <label>
                 <input type="checkbox" id="aplicar_descuento_inapam" name="aplicar_descuento_inapam"> DESCUENTO INAPAN
             </label>
@@ -603,7 +698,7 @@ button:hover {
 
         <!-- Sección Pagos -->
         <div class="seccion" id="seccion-pagos">
-            <i class="fas fa-money-check section-icon"></i>
+            <i class="fas fa-money-check section-icon">  Pagos</i>
             <select id="tipo_pago" name="tipo_pago">
                 <option value="completo">Pago Completo</option>
                 <option value="parcial">Pago Parcial</option>
@@ -642,16 +737,15 @@ button:hover {
         </div>
 
         <!-- Sección Wifi -->
-        <div class="seccion" id="seccion-wifi">
-            <i class="fas fa-wifi section-icon"></i>
-            <label>Wifi:</label>
-            <input type="text" name="Nombre_wifi" placeholder="Nombre WIFI">
-            <input type="text" name="contrasena" placeholder="Contraseña Wifi">
-        </div>
+<div class="seccion" id="seccion-wifi">
+    <i class="fas fa-wifi section-icon"> WIFI </i>
+    <label>Wifi:</label>
+    <input type="text" name="Nombre_wifi" placeholder="Nombre WIFI" value="<?= htmlspecialchars($wifi_nombre) ?>" <?= $rol !== 'admin' ? 'readonly' : '' ?>>
+</div>
 
         <!-- Totales -->
         <div class="seccion" id="seccion-totales">
-            <i class="fas fa-calculator section-icon"></i>
+            <i class="fas fa-calculator section-icon"> TOTALES</i>
             <div>Subtotal: $<span id="subtotal">0.00</span></div>
             <div>Descuento: $<span id="descuento">0.00</span></div>
             <div>Impuestos: $<span id="impuestos">0.00</span></div>
@@ -702,7 +796,15 @@ if (aplicarDescuentoInapam) {
         }
     });
 }
+document.getElementById('buscadorElementos').addEventListener('input', function () {
+        const filtro = this.value.toLowerCase();
+        const items = document.querySelectorAll('#elementos-grid .habitacion-item');
 
+        items.forEach(item => {
+            const texto = item.textContent.toLowerCase();
+            item.style.display = texto.includes(filtro) ? 'flex' : 'none';
+        });
+    });
         // Manejar tipo de pago
         function actualizarSeccionPagos() {
             const pagoCompleto = document.getElementById('pago-completo');
@@ -842,20 +944,22 @@ if (aplicarDescuentoInapam) {
         // Inicializar cálculos
         calcularTotales();
     });
-      // Toggle del sidebar en móvil
-      const toggleButton = document.querySelector('.toggle-sidebar');
-      const sidebar = document.querySelector('.sidebar');
-      const overlay = document.querySelector('.overlay');
+  
+     // Toggle del sidebar en móvil
+     const toggleButton = document.querySelector('.toggle-sidebar');
+        const sidebar = document.querySelector('.sidebar');
+        const overlay = document.querySelector('.overlay');
 
-      toggleButton.addEventListener('click', function() {
-        sidebar.classList.toggle('active');
-        overlay.classList.toggle('active');
-      });
+        toggleButton.addEventListener('click', function() {
+            sidebar.classList.toggle('active');
+            overlay.classList.toggle('active');
+        });
 
-      overlay.addEventListener('click', function() {
-        sidebar.classList.remove('active');
-        overlay.classList.remove('active');
-      });
+        overlay.addEventListener('click', function() {
+            sidebar.classList.remove('active');
+            overlay.classList.remove('active');
+        });
+    
     </script>
 </body>
 </html>

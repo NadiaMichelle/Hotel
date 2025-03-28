@@ -2,41 +2,70 @@
 session_start();
 require 'config.php';
 
-// Manejo de errores
+if (!isset($_SESSION['usuario_id'])) {
+    header('Location: login.php');
+    exit;
+}
+
+$rol = $_SESSION['rol'];
+$nombre_usuario = $_SESSION['nombre_usuario'];
 $error = '';
-
-// Lógica para mostrar los huéspedes
 $huespedes = [];
-$stmt = $pdo->query('SELECT * FROM huespedes');
-$huespedes = $stmt->fetchAll();
 
-if ($_SERVER['REQUEST_METHOD'] == 'POST') {
+// Mostrar todos los huéspedes por defecto
+try {
+    $stmt = $pdo->query('SELECT * FROM huespedes');
+    $huespedes = $stmt->fetchAll();
+} catch (PDOException $e) {
+    $error = "Error al cargar huéspedes: " . $e->getMessage();
+}
+
+// Si se envió el formulario
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (isset($_POST['buscar'])) {
-        // Lógica para buscar huéspedes
+        // Buscar huéspedes
         $nombre_huesped = $_POST['nombre_huesped'] ?? '';
         $tipo_huesped = $_POST['tipo_huesped'] ?? '';
-
-        // Preparar la consulta SQL con parámetros para evitar inyecciones SQL
-        if ($tipo_huesped) {
-            $stmt = $pdo->prepare('SELECT * FROM huespedes WHERE (nombre LIKE :nombre OR nombre_empresa LIKE :nombre) AND tipo_huesped = :tipo_huesped');
-            $stmt->bindParam(':tipo_huesped', $tipo_huesped, PDO::PARAM_STR);
-        } else {
-            $stmt = $pdo->prepare('SELECT * FROM huespedes WHERE nombre LIKE :nombre OR nombre_empresa LIKE :nombre');
-        }
         $nombre_like = "%$nombre_huesped%";
-        $stmt->bindParam(':nombre', $nombre_like, PDO::PARAM_STR);
-        $stmt->execute();
-        $huespedes = $stmt->fetchAll();
+
+        try {
+            if (!empty($tipo_huesped)) {
+                $stmt = $pdo->prepare('
+                    SELECT * FROM huespedes 
+                    WHERE (nombre LIKE :nombre OR nombre_empresa LIKE :nombre)
+                    AND tipo_huesped = :tipo_huesped
+                ');
+                $stmt->execute([
+                    ':nombre' => $nombre_like,
+                    ':tipo_huesped' => $tipo_huesped
+                ]);
+            } else {
+                $stmt = $pdo->prepare('
+                    SELECT * FROM huespedes 
+                    WHERE nombre LIKE :nombre OR nombre_empresa LIKE :nombre
+                ');
+                $stmt->execute([':nombre' => $nombre_like]);
+            }
+
+            $huespedes = $stmt->fetchAll();
+        } catch (PDOException $e) {
+            $error = "Error al buscar huéspedes: " . $e->getMessage();
+        }
+
     } elseif (isset($_POST['borrar'])) {
-        // Lógica para eliminar un huésped
+        // Eliminar huésped
         $id = $_POST['id'];
-        $stmt = $pdo->prepare('DELETE FROM huespedes WHERE id = ?');
-        if ($stmt->execute([$id])) {
-            // Redirigir para evitar el reenvío del formulario
-            header('Location: huespedes.php');
-            exit;
-        } else {
-            $error = "Hubo un error al eliminar el huésped.";
+
+        try {
+            $stmt = $pdo->prepare('DELETE FROM huespedes WHERE id = ?');
+            if ($stmt->execute([$id])) {
+                header('Location: huespedes.php');
+                exit;
+            } else {
+                $error = "No se pudo eliminar el huésped.";
+            }
+        } catch (PDOException $e) {
+            $error = "Error al eliminar huésped: " . $e->getMessage();
         }
     }
 }
@@ -51,73 +80,71 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
   <style>
-    /* Variables de color */
     :root {
-      --color-primary: #2c3e50; /* Azul */
-      --color-secondary: #2ecc71; /* Verde */
-      --color-accent: #e74c3c; /* Rojo */
-      --color-background: #f5f6fa; /* Gris claro */
-      --color-text: #2c3e50; /* Texto oscuro */
-      --color-success: #27ae60; /* Verde éxito */
-      --color-error: #e74c3c; /* Rojo error */
-      --color-border: #bdc3c7; /* Gris para bordes */
-      --color-shadow: rgba(0, 0, 0, 0.1); /* Sombra ligera */
+      --color-primario: #2c3e50;
+      --color-secundario: #3498db;
+      --color-background: #ffffff;
+      --color-text: #333333;
+      --color-border: #bdc3c7;
+      --color-shadow: rgba(0, 0, 0, 0.1);
+      --color-letters: #ffffff;
     }
 
-    /* Estilos generales */
     body {
       font-family: 'Roboto', sans-serif;
       background-color: var(--color-background);
       color: var(--color-text);
       margin: 0;
       padding: 0;
-      display: flex;
-      min-height: 100vh;
     }
 
-    a {
-      color: var(--color-primary);
-      text-decoration: none;
+    .toggle-sidebar {
+      display: none;
+      position: fixed;
+      top: 15px;
+      left: 15px;
+      background: var(--color-primario);
+      color: var(--color-letters);
+      border: none;
+      padding: 10px;
+      border-radius: 4px;
+      z-index: 1000;
     }
 
-    a:hover {
-      text-decoration: underline;
-    }
-
-    /* Sidebar */
     .sidebar {
+      position: fixed;
+      top: 0;
+      left: 0;
       width: 250px;
-      background-color: var(--color-primary);
-      color: white;
+      height: 100vh;
+      background-color: var(--color-primario);
+      color: var(--color-letters);
       padding: 20px;
-      box-sizing: border-box;
       display: flex;
       flex-direction: column;
+      z-index: 999;
       transition: left 0.3s ease;
     }
 
     .sidebar h2 {
       text-align: center;
       margin-bottom: 30px;
-      font-size: 1.5em;
     }
 
     .sidebar ul {
       list-style: none;
       padding: 0;
-      margin: 0;
     }
 
     .sidebar ul li {
-      margin: 20px 0;
+      margin: 15px 0;
     }
 
     .sidebar ul li a {
-      color: white;
+      color: var(--color-letters);
       text-decoration: none;
       display: flex;
       align-items: center;
-      font-size: 1.1em;
       padding: 10px;
       border-radius: 4px;
       transition: background-color 0.3s;
@@ -125,255 +152,143 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
 
     .sidebar ul li a i {
       margin-right: 10px;
-      font-size: 1.2em;
     }
 
     .sidebar ul li a:hover {
       background-color: rgba(255, 255, 255, 0.2);
     }
 
-    /* Contenido principal */
-    .content {
-      flex-grow: 1;
-      padding: 20px;
-      overflow-y: auto;
+    .overlay {
+      display: none;
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0,0,0,0.5);
+      z-index: 998;
+    }
+
+    .overlay.active {
+      display: block;
+    }
+
+    .contenido {
       margin-left: 250px;
+      padding: 30px;
       transition: margin-left 0.3s ease;
     }
 
-    /* Contenedor principal */
-    .container {
-      max-width: 1000px;
-      width: 100%;
-      background: white;
-      padding: 20px;
-      border-radius: 8px;
-      box-shadow: 0 2px 8px var(--color-shadow);
+   
+
+    .card {
+      background: var(--color-background);
+      padding: 25px;
+      border-radius: 10px;
+      box-shadow: 0 4px 12px var(--color-shadow);
     }
 
-    /* Botón Agregar */
-    .add-button {
-      background-color: var(--color-secondary);
-      color: white;
-      padding: 10px 15px;
-      border: none;
-      border-radius: 4px;
-      cursor: pointer;
-      font-size: 16px;
-      margin-bottom: 20px;
-    }
-
-    .add-button:hover {
-      background-color: #25a745;
-    }
-
-    /* Barra de búsqueda */
-    .search-container {
-      display: flex;
-      gap: 10px;
-      align-items: center;
-      margin-bottom: 20px;
-    }
-
-    .search-container input, .search-container select {
-      padding: 10px;
-      border: 1px solid var(--color-border);
-      border-radius: 4px;
-      font-size: 16px;
-    }
-
-    .search-container .search-input {
-      flex: 1;
-    }
-
-    .search-container .search-icon {
-      background: var(--color-primary);
-      color: white;
-      padding: 10px 15px;
-      border-radius: 4px;
-      cursor: pointer;
-    }
-
-    /* Tabla */
     .table-container {
-      overflow-y: auto;
-      max-height: 500px;
+      overflow-x: auto;
       border-radius: 8px;
     }
 
-    .guest-table {
-      width: 100%;
-      border-collapse: collapse;
-      min-width: 900px;
-    }
-
-    .guest-table th, .guest-table td {
-      padding: 12px;
-      text-align: center;
-      border-bottom: 1px solid var(--color-border);
-    }
-
-    .guest-table th {
-      background-color: var(--color-primary);
-      color: white;
-      font-weight: bold;
+    .table th {
       position: sticky;
       top: 0;
-      z-index: 2;
-    }
-
-    .guest-table img {
-      max-width: 50px;
-      border-radius: 4px;
-    }
-
-    /* Botones de acción */
-    .btn-edit, .btn-delete {
-      text-decoration: none;
-      color: #555;
-      margin: 0 5px;
-    }
-
-    .btn-edit:hover, .btn-delete:hover {
-      color: #000;
-    }
-
-    /* Botón para mostrar/ocultar el sidebar en móvil */
-    .toggle-sidebar {
-      display: none;
-      position: fixed;
-      top: 15px;
-      left: 15px;
-      background: var(--color-primary);
+      background-color: var(--color-primario);
       color: white;
-      border: none;
-      padding: 10px;
-      border-radius: 4px;
-      z-index: 1000;
     }
-
-    /* Responsive */
-    @media (max-width: 768px) {
-      .sidebar {
-        position: fixed;
-        top: 0;
-        left: -250px; /* Oculto por defecto en móvil */
-        height: 100%;
-        z-index: 999;
-      }
-      .sidebar.active {
-        left: 0;
-      }
-      .content {
-        margin-left: 0;
-      }
-      .toggle-sidebar {
-        display: block;
-      }
-      /* Overlay opcional para enfocar el sidebar */
-      .overlay {
-        display: none;
-        position: fixed;
-        top: 0;
-        left: 0;
-        width: 100%;
-        height: 100%;
-        background: rgba(0,0,0,0.5);
-        z-index: 998;
-      }
-      .overlay.active {
-        display: block;
-      }
-    }
-
-    @media (max-width: 480px) {
-      .search-container {
-        flex-direction: column;
-        align-items: flex-start;
-      }
-    }
-    
   </style>
 </head>
 <body>
-  <!-- Botón para togglear el sidebar en móvil -->
   <button class="toggle-sidebar d-md-none"><i class="fas fa-bars"></i></button>
-  
-  <!-- Sidebar -->
   <aside class="sidebar">
-    <h2>Menú</h2>
+    <h2><i class="fas fa-columns"></i> Menú</h2>
     <ul>
-      <li><a href="index.php"><i class="fas fa-home"></i> Inicio</a></li>
-      <li><a href="habitaciones.php"><i class="fas fa-bed"></i> Habitaciones y Servicios</a></li>
-      <li><a href="huespedes.php"><i class="fas fa-users"></i> Huéspedes</a></li>
-      <li><a href="Crear_Recibo.php"><i class="fas fa-pen-alt"></i> Generar Recibo</a></li>
-      <li><a href="recibos.php"><i class="fas fa-file-invoice"></i> Registros de Caja</a></li>
-      <li><a href="index.php" class="logout-btn"><i class="fas fa-sign-out-alt"></i> Salir</a></li>
+    <li><a href="bottom_menu.php"><i class="fas fa-home"></i> Inicio</a></li>
+        <?php if ($rol === 'admin'): ?>
+            <li><a href="habitaciones.php"><i class="fas fa-bed"></i> Habitaciones</a></li>
+            <li><a href="huespedes.php"><i class="fas fa-users"></i> Huéspedes</a></li>
+        <?php endif; ?>
+        <li><a href="Crear_Recibo.php"><i class="fas fa-pen-alt"></i> Generar Recibo</a></li>
+        <li><a href="recibos.php"><i class="fas fa-file-invoice"></i> Registro de Caja</a></li>
+        <li><a href="cancelaciones.php"><i class="fas fa-tools"></i> Cancelaciones</a></li>
+        <li><a href="configuracion.php"><i class="fas fa-cogs"></i> Configuración</a></li>
+        <li><a href="logout.php" class="logout-btn"><i class="fas fa-sign-out-alt"></i> Salir</a></li>
     </ul>
-  </aside>
+</aside>
 
-  <!-- Overlay opcional para móvil -->
   <div class="overlay"></div>
 
-  <!-- Contenido principal -->
-  <div class="content">
-    <div class="container">
-      <h1>Gestión de Huéspedes</h1>
-      <button class="add-button" onclick="window.location.href='agregar_huesped.php'">
-        <i class="fas fa-plus"></i> Agregar Huésped
-      </button>
+  <div class="contenido">
+    <div class="container-fluid">
+      <div class="card">
+        <div class="d-flex flex-column flex-md-row justify-content-between align-items-center mb-4">
+          <h2 class="text-primary mb-3 mb-md-0"><i class="fas fa-users me-2"></i> Gestión de Huéspedes</h2>
+          <a href="agregar_huesped.php" class="btn btn-success">
+            <i class="fas fa-plus"></i> Agregar
+          </a>
+        </div>
 
-      <div class="search-container">
-        <input type="text" id="search" class="search-input" placeholder="Buscar por nombre...">
-        <select id="filter-type">
-          <option value="">Todos</option>
-          <option value="persona">Persona</option>
-          <option value="empresa">Empresa</option>
-        </select>
-        <i class="fas fa-search search-icon"></i>
-      </div>
+        <form method="post" class="row g-3 mb-4">
+          <div class="col-md-5">
+          <input type="text" id="search" name="nombre_huesped" class="form-control" placeholder="Buscar por nombre o empresa">
+          </div>
+          <div class="col-md-4">
+          <select id="filter-type" name="tipo_huesped" class="form-select">
+              <option value="">Todos los tipos</option>
+              <option value="persona">Persona</option>
+              <option value="empresa">Empresa</option>
+            </select>
+          </div>
+          <div class="col-md-3">
+            <button type="submit" name="buscar" class="btn btn-primary w-100">
+              <i class="fas fa-search"></i> Buscar
+            </button>
+          </div>
+        </form>
 
-      <div class="table-container">
-        <table class="guest-table" id="guest-table">
-          <thead>
-            <tr>
-              <th>#</th>
-              <th>Logo</th>
-              <th>Tipo</th>
-              <th>RFC</th>
-              <th>Nombre / Empresa</th>
-              <th>Teléfono</th>
-              <th>Correo</th>
-              <th>Acciones</th>
-            </tr>
-          </thead>
-          <tbody>
-            <?php foreach ($huespedes as $index => $huesped): ?>
+        <div class="table-container">
+        <table id="guest-table" class="table table-bordered table-hover align-middle text-center">
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>Logo</th>
+                <th>Tipo</th>
+                <th>RFC</th>
+                <th>Nombre / Empresa</th>
+                <th>Teléfono</th>
+                <th>Correo</th>
+                <th>Acciones</th>
+              </tr>
+            </thead>
+            <tbody>
+              <?php foreach ($huespedes as $index => $huesped): ?>
               <tr>
                 <td><?= $index + 1 ?></td>
-                <td><?= $huesped['logo'] ? "<img src='{$huesped['logo']}' alt='Logo'>" : "No aplica" ?></td>
-                <td><?= $huesped['tipo_huesped'] ?></td>
+                <td><?= $huesped['logo'] ? "<img src='{$huesped['logo']}' alt='Logo' style='width:50px;height:50px;border-radius:8px;'>" : "No aplica" ?></td>
+                <td><?= ucfirst($huesped['tipo_huesped']) ?></td>
                 <td><?= $huesped['rfc'] ?></td>
                 <td><?= $huesped['tipo_huesped'] === 'persona' ? $huesped['nombre'] : $huesped['nombre_empresa'] ?></td>
                 <td><?= $huesped['telefono'] ?></td>
                 <td><?= $huesped['correo'] ?></td>
                 <td>
-                  <!-- Botón Editar -->
-                  <a href="editar_huesped.php?id=<?= $huesped['id'] ?>" class="btn-edit" title="Editar">
+                  <a href="editar_huesped.php?id=<?= $huesped['id'] ?>" class="btn btn-sm btn-warning">
                     <i class="fas fa-edit"></i>
                   </a>
-                  <!-- Botón Eliminar -->
-                  <form method="POST" action="huespedes.php" style="display:inline;" onsubmit="return confirm('¿Seguro que deseas eliminar este huésped?');">
+                  <form method="POST" action="huespedes.php" class="d-inline" onsubmit="return confirm('¿Seguro que deseas eliminar este huésped?');">
                     <input type="hidden" name="id" value="<?= $huesped['id'] ?>">
-                    <button type="submit" name="borrar" class="btn-delete" title="Eliminar">
+                    <button type="submit" name="borrar" class="btn btn-sm btn-danger">
                       <i class="fas fa-trash"></i>
                     </button>
                   </form>
                 </td>
               </tr>
-            <?php endforeach; ?>
-          </tbody>
-        </table>
+              <?php endforeach; ?>
+            </tbody>
+          </table>
+        </div>
       </div>
     </div>
   </div>
@@ -407,9 +322,9 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
 
       searchInput.addEventListener("keyup", renderTable);
       filterType.addEventListener("change", renderTable);
-
-      // Toggle del sidebar en móvil
-      const toggleButton = document.querySelector('.toggle-sidebar');
+ });
+     // Toggle del sidebar en móvil
+     const toggleButton = document.querySelector('.toggle-sidebar');
       const sidebar = document.querySelector('.sidebar');
       const overlay = document.querySelector('.overlay');
 
@@ -422,7 +337,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
         sidebar.classList.remove('active');
         overlay.classList.remove('active');
       });
-    });
   </script>
 </body>
 </html>
+>

@@ -3,6 +3,14 @@
 session_start();
 require 'config.php';
 
+if (!isset($_SESSION['usuario_id'])) {
+    header('Location: login.php');
+    exit;
+}
+
+$rol = $_SESSION['rol'];
+$nombre_usuario = $_SESSION['nombre_usuario'];
+
 // Manejar errores solo en desarrollo
 if (isset($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower($_SERVER['HTTP_X_REQUESTED_WITH']) === 'xmlhttprequest') {
     ini_set('display_errors', 0);
@@ -17,11 +25,9 @@ $error = '';
 $elementos = [];
 $busqueda = isset($_GET['busqueda']) ? trim($_GET['busqueda']) : '';
 try {
-    // Obtener parámetros de filtro de la URL
     $tipo = isset($_GET['tipo']) ? $_GET['tipo'] : '';
     $estado = isset($_GET['estado']) ? $_GET['estado'] : '';
 
-    // Construir consulta SQL dinámica
     $sql = "SELECT * FROM elementos";
     $conditions = [];
     $params = [];
@@ -54,62 +60,55 @@ try {
 if ($_SERVER['REQUEST_METHOD'] == 'POST') {
     header('Content-Type: application/json');
     $response = ['success' => false, 'error' => ''];
-
     if (isset($_POST['borrar_elemento'])) {
         try {
             $id = intval($_POST['id']);
-            // Verificar si hay reservas asociadas
-            $stmt = $pdo->prepare('SELECT COUNT(*) FROM detalles_reserva WHERE elemento_id = ?');
+    
+            // Primero eliminamos reservas asociadas (si existen)
+            $stmt = $pdo->prepare('DELETE FROM detalles_reserva WHERE elemento_id = ?');
             $stmt->execute([$id]);
-            $count = $stmt->fetchColumn();
-
-            if ($count > 0) {
-                $response['error'] = "No se puede borrar el elemento porque tiene reservas asociadas.";
+    
+            // Luego eliminamos el elemento
+            $stmt = $pdo->prepare('DELETE FROM elementos WHERE id = ?');
+            if ($stmt->execute([$id])) {
+                $response['success'] = true;
+                $stmt = $pdo->query('SELECT id, codigo, nombre, descripcion, tipo, estado, precio, inapam_valido, creado_at, updated_at FROM elementos');
+                $elementos = $stmt->fetchAll(PDO::FETCH_ASSOC);
+                $response['elementos'] = $elementos;
             } else {
-                // Borrar el elemento
-                $stmt = $pdo->prepare('DELETE FROM elementos WHERE id = ?');
-                if ($stmt->execute([$id])) {
-                    $response['success'] = true;
-                    // Recargar elementos
-                    $stmt = $pdo->query('SELECT id, codigo, nombre, descripcion, tipo, estado, creado_at, updated_at FROM elementos');
-                    $elementos = $stmt->fetchAll(PDO::FETCH_ASSOC);
-                    $response['elementos'] = $elementos;
-                } else {
-                    $response['error'] = "Error al borrar el elemento.";
-                }
+                $response['error'] = "Error al borrar el elemento.";
             }
         } catch (PDOException $e) {
             $response['error'] = "Error de base de datos: " . $e->getMessage();
         }
+    
         echo json_encode($response);
         exit;
     } elseif (isset($_POST['editar_elemento'])) {
         try {
             $id = intval($_POST['id']);
-            // Obtener el elemento actual
             $stmt = $pdo->prepare('SELECT * FROM elementos WHERE id = ?');
             $stmt->execute([$id]);
             $elemento = $stmt->fetch();
 
             if ($elemento) {
-                // Obtener datos del formulario
                 $estado = $_POST['estado'] ?? $elemento['estado'];
                 $nombre = trim($_POST['nombre'] ?? $elemento['nombre']);
                 $descripcion = trim($_POST['descripcion'] ?? $elemento['descripcion']);
                 $tipo = $_POST['tipo'] ?? $elemento['tipo'];
+                $precio = is_numeric($_POST['precio']) ? floatval($_POST['precio']) : $elemento['precio'];
+                $inapam_valido = isset($_POST['inapam_valido']) ? 1 : 0;
 
-                // Validar que el nombre y tipo no se dupliquen
+
                 $stmt = $pdo->prepare('SELECT id FROM elementos WHERE nombre = ? AND tipo = ? AND id != ?');
                 $stmt->execute([$nombre, $tipo, $id]);
                 if ($stmt->fetch()) {
                     $response['error'] = "El nombre del elemento ya existe para este tipo.";
                 } else {
-                    // Actualizar el elemento
-                    $stmt = $pdo->prepare('UPDATE elementos SET nombre = ?, descripcion = ?, tipo = ?, estado = ? WHERE id = ?');
-                    if ($stmt->execute([$nombre, $descripcion, $tipo, $estado, $id])) {
+                    $stmt = $pdo->prepare('UPDATE elementos SET nombre = ?, descripcion = ?, tipo = ?, estado = ?, precio = ? WHERE id = ?');
+                    if ($stmt->execute([$nombre, $descripcion, $tipo, $estado, $precio, $id])) {
                         $response['success'] = true;
-                        // Recargar elementos
-                        $stmt = $pdo->query('SELECT id, codigo, nombre, descripcion, tipo, estado, created_at, updated_at FROM elementos');
+                        $stmt = $pdo->query('SELECT id, codigo, nombre, descripcion, tipo, estado, precio, created_at, updated_at FROM elementos');
                         $elementos = $stmt->fetchAll(PDO::FETCH_ASSOC);
                         $response['elementos'] = $elementos;
                     } else {
@@ -131,28 +130,28 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
             if ($tipo == 'habitacion') {
                 $nombre = trim($_POST['numero_habitacion']);
                 $descripcion = trim($_POST['descripcion']);
-                $estado = $_POST['estado'] ?? 'disponible'; // Valor predeterminado para habitaciones
+                if ($descripcion === 'otro' && isset($_POST['descripcion_personalizada'])) {
+                    $descripcion = trim($_POST['descripcion_personalizada']);
+                }
+                $estado = $_POST['estado'] ?? 'disponible';
+                $precio = is_numeric($_POST['precio']) ? floatval($_POST['precio']) : 0.00;
 
-                // Verificar si la habitación ya existe
                 $stmt = $pdo->prepare('SELECT id FROM elementos WHERE nombre = ? AND tipo = ?');
                 $stmt->execute([$nombre, 'habitacion']);
 
                 if ($stmt->fetch()) {
                     $response['error'] = "La habitación ya existe.";
                 } else {
-                    // Obtener el siguiente código
                     $stmt = $pdo->prepare('SELECT MAX(codigo) FROM elementos WHERE tipo = ?');
                     $stmt->execute([$tipo]);
                     $maxCodigo = $stmt->fetchColumn();
                     $numero = $maxCodigo ? intval(substr($maxCodigo, 1)) + 1 : 1;
                     $codigo = 'H' . str_pad($numero, 4, '0', STR_PAD_LEFT);
 
-                    // Insertar la nueva habitación
-                    $stmt = $pdo->prepare('INSERT INTO elementos (codigo, nombre, descripcion, tipo, estado) VALUES (?, ?, ?, ?, ?)');
-                    if ($stmt->execute([$codigo, $nombre, $descripcion, $tipo, $estado])) {
+                    $stmt = $pdo->prepare('INSERT INTO elementos (codigo, nombre, descripcion, tipo, estado, precio) VALUES (?, ?, ?, ?, ?, ?)');
+                    if ($stmt->execute([$codigo, $nombre, $descripcion, $tipo, $estado, $precio])) {
                         $response['success'] = true;
-                        // Recargar elementos
-                        $stmt = $pdo->query('SELECT id, codigo, nombre, descripcion, tipo, estado, created_at, updated_at FROM elementos');
+                        $stmt = $pdo->query('SELECT id, codigo, nombre, descripcion, tipo, estado, precio, created_at, updated_at FROM elementos');
                         $elementos = $stmt->fetchAll(PDO::FETCH_ASSOC);
                         $response['elementos'] = $elementos;
                     }
@@ -160,28 +159,25 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
             } elseif ($tipo == 'servicio') {
                 $nombre = trim($_POST['nombre_servicio']);
                 $descripcion = trim($_POST['descripcion']);
-                $estado = 'activo'; // Valor predeterminado para servicios
+                $estado = 'activo';
+                $precio = is_numeric($_POST['precio']) ? floatval($_POST['precio']) : 0.00;
 
-                // Verificar si el servicio ya existe
                 $stmt = $pdo->prepare('SELECT id FROM elementos WHERE nombre = ? AND tipo = ?');
                 $stmt->execute([$nombre, 'servicio']);
 
                 if ($stmt->fetch()) {
                     $response['error'] = "El servicio ya existe.";
                 } else {
-                    // Obtener el siguiente código
                     $stmt = $pdo->prepare('SELECT MAX(codigo) FROM elementos WHERE tipo = ?');
                     $stmt->execute([$tipo]);
                     $maxCodigo = $stmt->fetchColumn();
                     $numero = $maxCodigo ? intval(substr($maxCodigo, 1)) + 1 : 1;
                     $codigo = 'S' . str_pad($numero, 4, '0', STR_PAD_LEFT);
 
-                    // Insertar el nuevo servicio
-                    $stmt = $pdo->prepare('INSERT INTO elementos (codigo, nombre, descripcion, tipo, estado) VALUES (?, ?, ?, ?, ?)');
-                    if ($stmt->execute([$codigo, $nombre, $descripcion, $tipo, $estado])) {
+                    $stmt = $pdo->prepare('INSERT INTO elementos (codigo, nombre, descripcion, tipo, estado, precio) VALUES (?, ?, ?, ?, ?, ?)');
+                    if ($stmt->execute([$codigo, $nombre, $descripcion, $tipo, $estado, $precio])) {
                         $response['success'] = true;
-                        // Recargar elementos
-                        $stmt = $pdo->query('SELECT id, codigo, nombre, descripcion, tipo, estado, created_at, updated_at FROM elementos');
+                        $stmt = $pdo->query('SELECT id, codigo, nombre, descripcion, tipo, estado, precio, created_at, updated_at FROM elementos');
                         $elementos = $stmt->fetchAll(PDO::FETCH_ASSOC);
                         $response['elementos'] = $elementos;
                     }
@@ -195,6 +191,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
     }
 }
 ?>
+
 <!DOCTYPE html>
 <html lang="es">
 <head>
@@ -581,16 +578,20 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
 
     <!-- Sidebar -->
     <aside class="sidebar">
-        <h2>Menú</h2>
-        <ul>
-            <li><a href="index.php"><i class="fas fa-home"></i> Inicio</a></li>
-            <li><a href="habitaciones.php"><i class="fas fa-bed"></i> Servicios</a></li>
+    <h2><i class="fas fa-columns"></i> Menú</h2>
+    <ul>
+    <li><a href="bottom_menu.php"><i class="fas fa-home"></i> Inicio</a></li>
+        <?php if ($rol === 'admin'): ?>
+            <li><a href="habitaciones.php"><i class="fas fa-bed"></i> Habitaciones</a></li>
             <li><a href="huespedes.php"><i class="fas fa-users"></i> Huéspedes</a></li>
-            <li><a href="Crear_Recibo.php"><i class="fas fa-pen-alt"></i> Generar Recibo</a></li>
-            <li><a href="recibos.php"><i class="fas fa-file-invoice"></i> Registros de Caja</a></li>
-            <li><a href="index.php" class="logout-btn"><i class="fas fa-sign-out-alt"></i> Salir</a></li>
-        </ul>
-    </aside>
+        <?php endif; ?>
+        <li><a href="Crear_Recibo.php"><i class="fas fa-pen-alt"></i> Generar Recibo</a></li>
+        <li><a href="recibos.php"><i class="fas fa-file-invoice"></i> Registro de Caja</a></li>
+        <li><a href="cancelaciones.php"><i class="fas fa-tools"></i> Cancelaciones</a></li>
+        <li><a href="configuracion.php"><i class="fas fa-cogs"></i> Configuración</a></li>
+        <li><a href="logout.php" class="logout-btn"><i class="fas fa-sign-out-alt"></i> Salir</a></li>
+    </ul>
+</aside>
     <!-- Overlay para móvil -->
     <div class="overlay"></div>
     <!-- Contenido principal -->
@@ -617,21 +618,38 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                             <label for="numero_habitacion_add">Número de Habitación:</label>
                             <input type="text" id="numero_habitacion_add" name="numero_habitacion" required>
     </div>
-                    <div class="habitacion-item">
-                    <select name="descripcion" class="Habitacion_tipo">
-                            <option value="efectivo">Habitacion Estandar</option>
-                            <option value="tarjeta_debito">Master Suite (Habitacion Cuadruple)</option>
-                            <option value="tarjeta_credito">Bungalow Chico</option>
-                            <option value="transferencia">Habitacion Sencilla</option>
-                            <option value="transferencia">Suite, KingSize y dos sofas</option>
-                            <option value="transferencia">Habitacion Sencilla</option>
-                            <option value="transferencia">Suite Jr</option>
-                            <option value="transferencia">Suite</option>
-                        </select>
-                     <button type="submit" name="agregar" class="btn btn-primary">
-                    <i class="fas fa-plus"></i> Agregar
-                </button>
-                
+    <div class="habitacion-item">
+    <select name="descripcion" class="Habitacion_tipo" id="habitacion_tipo">
+        <option value="">Seleccione una opción</option>
+        <option value="Habitacion Estandar">Habitación Estándar</option>
+        <option value="Master Suite (Habitacion Cuadruple)">Master Suite (Habitación Cuádruple)</option>
+        <option value="Bungalow Chico">Bungalow Chico</option>
+        <option value="Habitacion Sencilla 1">Habitación Sencilla</option>
+        <option value="Suite, KingSize y dos sofas">Suite, KingSize y dos sofás</option>
+        <option value="Habitacion Sencilla 2">Habitación Sencilla</option>
+        <option value="Suite Jr">Suite Jr</option>
+        <option value="Suite">Suite</option>
+        <option value="otro">Otro</option>
+    </select>
+    <input type="number" step="0.01" min="0" name="precio" id="precio_habitacion"
+    class="form-control mt-2" placeholder="Precio por noche" required> 
+    <div class="form-check mt-2">
+  <input class="form-check-input" type="checkbox" id="inapam_habitacion" name="inapam_valido" value="1">
+  <label class="form-check-label" for="inapam_habitacion">
+    Válido con INAPAM
+  </label>
+</div>
+
+            <!-- Campo oculto que aparece solo si elige "Otro" -->
+            <input type="text" name="descripcion_personalizada" id="descripcion_personalizada" 
+                placeholder="Especifica tipo de habitación" 
+                style="display:none; margin-top: 10px;" class="form-control" />
+
+            <button type="submit" name="agregar" class="btn btn-primary mt-2">
+                <i class="fas fa-plus"></i> Agregar
+            </button>
+        </div>
+    
                     <!-- Formulario para agregar servicio -->
                     <div id="form-servicio">
                         <h2>Agregar Servicio</h2>
@@ -643,7 +661,17 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                             <label for="descripcion_add">Descripción:</label>
                             <textarea id="descripcion_add" name="descripcion" maxlength="300"></textarea>
                         </div>
-                    </div>
+
+                        <input type="number" step="0.01" min="0" name="precio" id="precio_servicio"
+                         class="form-control mt-2" placeholder="Precio del servicio" required>
+                </div>
+                <div class="form-check mt-2">
+                    <input class="form-check-input" type="checkbox" id="inapam_servicio" name="inapam_valido" value="1">
+                    <label class="form-check-label" for="inapam_servicio">
+                        Válido con INAPAM
+                    </label>
+                </div>
+
                 </div>
 
                 <button type="submit" name="agregar" class="btn btn-primary">
@@ -687,10 +715,11 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
              <thead>
                 <tr>
                         <th>Código</th>
-                        <th>Nombre</th>
+                        <th>Nombre/Numero</th>
                         <th>Descripcion</th>
                         <th>Tipo</th>
                         <th>Estado</th>
+                        <th>Precio</th>
                         <th>Creado At</th>
                         <th>Updated At</th>
                         <th>Acciones</th>
@@ -704,6 +733,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                         <td><?= htmlspecialchars($e['descripcion']) ?></td>
                         <td><?= htmlspecialchars($e['tipo']) ?></td>
                         <td><?= htmlspecialchars($e['estado']) ?></td>
+                        <td><?= htmlspecialchars($e['precio']) ?></td>
                         <td><?= htmlspecialchars($e['creado_at']) ?></td>
                         <td><?= htmlspecialchars($e['updated_at']) ?></td>
                         <td>
@@ -738,28 +768,51 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
 
             if (tipoSeleccionado === 'habitacion') {
                 contenidoCondicional.innerHTML = `
-                    <h2>Agregar Habitación</h2>
-                    <div class="form-group">
-                        <label for="numero_habitacion_add">Número de Habitación:</label>
-                        <input type="text" id="numero_habitacion_add" name="numero_habitacion" required>
-                    </div>
-                    <div class="habitacion-item">
-                    <select name="descripcion" class="Habitacion_tipo">
-                        <option value="Habitación Estandar">Habitacion Estandar</option>
-                        <option value="Master Suite">Master Suite (Habitacion Cuadruple)</option>
-                        <option value="Bungalow Chico">Bungalow Chico</option>
-                        <option value="Bungalow Mediano">Bungalow Mediano</option>
-                        <option value="Habitacion Sencilla">Habitacion Sencilla</option>
-                        <option value="Suite King">Suite, KingSize y dos sofás</option>
-                        <option value="Suite Jr">Suite Jr</option>
-                        <option value="Suite">Suite</option>
-                        <option value="otro">Otro</option>
-                    </select>
-  <button type="submit" name="agregar" class="btn btn-primary">
-                    <i class="fas fa-plus"></i> Agregar
-                </button>
-                    
-                `;
+                        <h2>Agregar Habitación</h2>
+                        <div class="form-group">
+                            <label for="numero_habitacion_add">Número de Habitación:</label>
+                            <input type="text" id="numero_habitacion_add" name="numero_habitacion" required>
+                        </div>
+                        <div class="habitacion-item">
+                            <select name="descripcion" class="Habitacion_tipo" id="habitacion_tipo">
+                                <option value="">Seleccione una opción</option>
+                                <option value="Habitación Estandar">Habitación Estándar</option>
+                                <option value="Master Suite">Master Suite</option>
+                                <option value="Bungalow Chico">Bungalow Chico</option>
+                                <option value="Bungalow Mediano">Bungalow Mediano</option>
+                                <option value="Habitacion Sencilla">Habitación Sencilla</option>
+                                <option value="Suite King">Suite King</option>
+                                <option value="Suite Jr">Suite Jr</option>
+                                <option value="Suite">Suite</option>
+                                <option value="otro">Otro</option>
+                                <input type="number" step="0.01" min="0" name="precio" id="precio_servicio"
+                                class="form-control mt-2" placeholder="Precio del servicio" required>
+                                </select>
+                                <div class="form-check mt-2">
+                                    <input class="form-check-input" type="checkbox" id="inapam_habitacion" name="inapam_valido" value="1">
+                                    <label class="form-check-label" for="inapam_habitacion">
+                                        Válido con INAPAM
+                                    </label>
+                            </div>
+                            <input type="text" name="descripcion_personalizada" id="descripcion_personalizada"
+                                placeholder="Especifica tipo de habitación"
+                                style="display:none; margin-top: 10px;" class="form-control" />
+                            <button type="submit" name="agregar" class="btn btn-primary mt-2">
+                                <i class="fas fa-plus"></i> Agregar
+                            </button>
+                        </div>
+                        `;
+                        document.getElementById('habitacion_tipo').addEventListener('change', function () {
+                const inputOtro = document.getElementById('descripcion_personalizada');
+                if (this.value === 'otro') {
+                    inputOtro.style.display = 'block';
+                    inputOtro.required = true;
+                } else {
+                    inputOtro.style.display = 'none';
+                    inputOtro.required = false;
+                }
+            });
+
             } else if (tipoSeleccionado === 'servicio') {
                 contenidoCondicional.innerHTML = `
                     <h2>Agregar Servicio</h2>
@@ -771,12 +824,22 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                         <label for="descripcion_add">Descripción:</label>
                         <textarea id="descripcion_add" name="descripcion" maxlength="300"></textarea>
                     </div>
+                    <input type="number" step="0.01" min="0" name="precio" id="precio_servicio"
+                    class="form-control mt-2" placeholder="Precio del servicio" required>
                       <button type="submit" name="agregar" class="btn btn-primary">
+                      <div class="form-check mt-2">
+                            <input class="form-check-input" type="checkbox" id="inapam_servicio" name="inapam_valido" value="1">
+                            <label class="form-check-label" for="inapam_servicio">
+                                Válido con INAPAM
+                            </label>
+                            </div>
+
                     <i class="fas fa-plus"></i> Agregar
                 </button>
                 `;
             }
         }
+           
 
         // Envío del formulario unificado
         const formUnificado = document.getElementById('form-unificado');
@@ -831,6 +894,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                         <td>${e.nombre}</td>
                         <td>${e.descripcion || ''}</td>
                         <td>${e.tipo}</td>
+                        <td>${e.precio}</td>
                         <td>${e.estado}</td>
                         <td>${e.created_at}</td>
                         <td>${e.updated_at}</td>

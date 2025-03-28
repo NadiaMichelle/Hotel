@@ -40,17 +40,21 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
     $descripcion = trim($_POST['descripcion']);
     $tipo = $_POST['tipo'];
     $estado = $_POST['estado'];
+    $precio = is_numeric($_POST['precio']) ? floatval($_POST['precio']) : 0.00;
+    $inapam_valido = isset($_POST['inapam_valido']) ? 1 : 0;
+
 
     try {
         // Validar que el nombre y tipo no se dupliquen
-        $stmt = $pdo->prepare('SELECT id FROM elementos WHERE nombre = ? AND tipo = ? AND id != ?');
-        $stmt->execute([$nombre, $tipo, $id]);
+        $stmt = $pdo->prepare('UPDATE elementos SET nombre = ?, descripcion = ?, tipo = ?, estado = ?, precio = ?, inapam_valido = ? WHERE id = ?');
+$stmt->execute([$nombre, $descripcion, $tipo, $estado, $precio, $inapam_valido, $id]);
+
         if ($stmt->fetch()) {
             $error = "El nombre del elemento ya existe para este tipo.";
         } else {
             // Actualizar el elemento
-            $stmt = $pdo->prepare('UPDATE elementos SET nombre = ?, descripcion = ?, tipo = ?, estado = ? WHERE id = ?');
-            if ($stmt->execute([$nombre, $descripcion, $tipo, $estado, $id])) {
+            $stmt = $pdo->prepare('UPDATE elementos SET nombre = ?, descripcion = ?, tipo = ?, estado = ?, precio = ? WHERE id = ?');
+            if ($stmt->execute([$nombre, $descripcion, $tipo, $estado, $precio, $id])) {
                 // Redirigir de vuelta a la página principal
                 header('Location: habitaciones.php');
                 exit;
@@ -327,6 +331,10 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                     <textarea id="descripcion" name="descripcion"><?= htmlspecialchars($elemento['descripcion']) ?></textarea>
                 </div>
                 <div class="form-group">
+                    <label for="descripcion">Precio:</label>
+                    <input type="number" step="0.01" min="0" name="precio" value="<?= htmlspecialchars($elemento['precio']) ?>"required>
+                </div>
+                <div class="form-group">
                     <label for="tipo">Tipo:</label>
                     <select id="tipo" name="tipo" required>
                         <option value="habitacion" <?php if ($elemento['tipo'] == 'habitacion') echo 'selected'; ?>>Habitación</option>
@@ -341,6 +349,11 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                         <option value="Mantenimiento" <?php if ($elemento['estado'] == 'Mantenimiento') echo 'selected'; ?>>Mantenimiento</option>
                     </select>
                 </div>
+                        <div class="form-group form-check">
+                        <input type="checkbox" class="form-check-input" id="inapam_valido" name="inapam_valido"
+                                <?= isset($elemento['inapam_valido']) && $elemento['inapam_valido'] ? 'checked' : '' ?>>
+                        <label class="form-check-label" for="inapam_valido">Válido con INAPAM</label>
+                        </div>
                 <button type="submit" class="btn btn-primary">Guardar Cambios</button>
                 <a href="habitaciones.php" class="btn btn-cancelar">Cancelar</a>
             </form>

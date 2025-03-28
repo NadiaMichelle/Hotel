@@ -165,8 +165,7 @@ if (!$elementos) {
 <div class="recibo">
         <div class="header">
             <h3>HOTEL MELAQUE PUESTA DEL SOL</h3>
-            <p>Ignacio Gutiérrez Anaya</p>
-            <p>Folio No 17020</p>
+            <p>RFC: GUAI690714GB4</p>
             <p>Régimen de Personas Físicas con Actividad Empresarial y Profesional</p>
             <p>Gómez Farías No. 31</p>
             <p>Tels.: (315) 355 5797</p>
@@ -176,13 +175,13 @@ if (!$elementos) {
         <div class="separador"></div>
 
         <div class="detalle">
-            <p><strong>Recibo #:</strong> <?= htmlspecialchars($recibo['id']) ?></p>
+            <p><strong>Folio #:</strong> <?= htmlspecialchars($recibo['id']) ?></p>
             <p><strong>Fecha:</strong> <?= date('d/m/Y H:i') ?></p>
             <p><strong>Huésped:</strong> <?= htmlspecialchars($recibo['nombre_huesped']) ?></p>
             <p><strong>Encargado:</strong> <?= htmlspecialchars($_SESSION['nombre_usuario']) ?></p>
-            <p><strong>Check-in:</strong> <?= htmlspecialchars($recibo['check_in']) ?></p>
-            <p><strong>Check-out:</strong> <?= htmlspecialchars($recibo['check_out']) ?></p>
-            <p><strong>Elementos de la Reserva:</strong></p>
+            <p><strong>Ingreso:</strong> <?= htmlspecialchars($recibo['check_in']) ?></p>
+            <p><strong>Salida antes de las 12:00 hrs:</strong> <?= htmlspecialchars($recibo['check_out']) ?></p>
+            <p><strong>Habitaciones Rentadas:</strong></p>
             <div class="elementos">
                 <?php foreach ($elementos as $elemento): ?>
                     <p>- <?= htmlspecialchars($elemento['nombre']) ?> (<?= htmlspecialchars($elemento['descripcion']) ?>) - Tarifa: $<?= number_format($elemento['tarifa'], 2) ?></p>
@@ -195,13 +194,13 @@ if (!$elementos) {
         <div class="separador"></div>
 
         <div class="anticipos">
-            <p><strong>Anticipos:</strong></p>
+            <p><strong>Formas de Pago:</strong></p>
             <?php if ($anticipos): ?>
                 <?php foreach ($anticipos as $anticipo): ?>
                     <p>- $<?= number_format($anticipo['monto'], 2) ?> pagado el <?= htmlspecialchars($anticipo['fecha']) ?> mediante <?= htmlspecialchars($anticipo['metodo_pago']) ?></p>
                 <?php endforeach; ?>
             <?php else: ?>
-                <p>No se han realizado anticipos para esta reserva.</p>
+                <p>No se han realizado pagos para esta reserva.</p>
             <?php endif; ?>
         </div>
 
@@ -227,20 +226,20 @@ if (!$elementos) {
 
         <div class="reglas">
             <p><strong>REGLAS DEL HOTEL</strong></p>
-            <p>GRACIAS POR NO FUMAR | NO MASCOTAS | NO MÚSICA | NO MUSICIANS</p>
+            <p>GRACIAS POR NO FUMAR | NO MASCOTAS | NO MÚSICA |NI MUSICOS </p>
             <p><i class="fa-solid fa-smoking-ban"></i> <i class="fa-solid fa-dog"></i> <i class="fa-solid fa-music"></i> <i class="fa-solid fa-user-ninja"></i></p>
         </div>
 
         <div class="footer">
             <p>1. EL HOTEL NO SE HACE RESPONSABLE POR LOS VALORES Y/O PERTENENCIAS NO DEPOSITADOS PARA SU CUSTODIA EN RECEPCIÓN.</p>
-            <p>2. SE PAGARÁ EL IMPORTE DE LAS HABITACIONES OPORTUNAMENTE Y CUANDO EN LA RECEPCIÓN SE LE REQUIERE.</p>
+            <p>2. SE PAGARÁ EL IMPORTE DE LAS HABITACIONES OPORTUNAMENTE Y/O CUANDO EN LA RECEPCIÓN SE LE REQUIERA.</p>
             <p>3. PROHIBIDO INTRODUCIR AL HOTEL MELAQUE PUESTA DEL SOL ANIMALES, MÚSICOS, VENDEDORES Y/O PERSONAS NO AUTORIZADAS O NO REGISTRADAS.</p>
             <p>4. EN CASO DE CANCELACIÓN SE COBRARÁ EL 30% DE LO CANCELADO.</p>
-            <p>5. ACEPTO DEVOLVER EN BUEN ESTADO AL HOTEL PUESTA DEL SOL, LAS TOALLAS PRESTADAS; DE NO SER ASÍ, ESTOY DE ACUERDO EN PAGAR POR CADA TOALLA DE ALBERCA 290.00 PESOS Y 250.00 PESOS POR CADA TOALLA DE HABITACIÓN.</p>
+            <p>5. ACEPTO DEVOLVER EN BUEN ESTADO AL HOTEL PUESTA DEL SOL, LAS TOALLAS PRESTADAS; DE NO SER ASÍ, ESTOY DE ACUERDO EN PAGAR POR CADA TOALLA DE ALBERCA Y DE HABITACIÓN.</p>
             <p>6. EN CUMPLIMIENTO A LA LEY FEDERAL DE PROTECCIÓN DE DATOS PERSONALES EN POSESIÓN DE LOS PARTICULARES, ESTÁ A LA VISTA EN LA RECEPCIÓN EL AVISO DE PRIVACIDAD, ASÍ COMO NUESTRA POLÍTICA DE PRIVACIDAD.</p>
             <p>7. ESTÁ PROHIBIDO PONER MÚSICA GRABADA O MÚSICA EN VIVO.</p>
             <p>8. ESTÁ PROHIBIDO FUMAR DENTRO DE TODO EL HOTEL INCLUYENDO SUS HABITACIONES.</p>
-            <p>9. EL HOTEL MELAQUE PUESTA DEL SOL, NO ESTÁ OBLIGADO A RECIBIR Y/O PRESTAR SERVICIO A PERSONAS NO REGISTRADAS EN ESTE FORMATO.</p>
+            <p>9. EL HOTEL MELAQUE PUESTA DEL SOL, NO ESTÁ OBLIGADO A RECIBIR Y/O PRESTAR SERVICIO A PERSONAS NO REGISTRADAS.</p>
         </div>
     </div>
 </body>

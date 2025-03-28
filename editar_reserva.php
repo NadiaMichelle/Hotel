@@ -18,7 +18,24 @@ function manejarError($mensaje) {
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     try {
-        // Validar campos requeridos
+        if (!isset($_POST['recibo_id']) || !is_numeric($_POST['recibo_id'])) {
+            manejarError("ID de recibo no válido.");
+        }
+
+        $recibo_id = $_POST['recibo_id'];
+
+        $stmt = $pdo->prepare("SELECT * FROM recibos WHERE id = ?");
+        $stmt->execute([$recibo_id]);
+        $recibo = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        if (!$recibo) {
+            throw new Exception("No se encontró la reserva.");
+        }
+
+        $stmt = $pdo->prepare("SELECT elemento_id FROM detalles_reserva WHERE recibo_id = ?");
+        $stmt->execute([$recibo_id]);
+        $elementos = $stmt->fetchAll(PDO::FETCH_COLUMN);
+
         $camposRequeridos = [
             'check_in' => 'Fecha de check-in es requerida',
             'check_out' => 'Fecha de check-out es requerida',
@@ -36,232 +53,186 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
         }
 
-        // Validar porcentajes
         $iva = (float)$_POST['iva'];
         $ish = (float)$_POST['ish'];
         if ($iva < 0 || $iva > 100 || $ish < 0 || $ish > 100) {
             throw new Exception("Los porcentajes deben estar entre 0 y 100");
         }
 
-        // Validar tarifa
         $tarifa_por_noche = (float)$_POST['tarifa_por_noche'];
         if ($tarifa_por_noche <= 0) {
             throw new Exception("La tarifa por noche debe ser un valor positivo");
         }
 
-        // Validar fechas
         $check_in = $_POST['check_in'];
         $check_out = $_POST['check_out'];
         $hoy = new DateTime('today');
         $check_in_date = new DateTime($check_in);
         $check_out_date = new DateTime($check_out);
-        
-        if ($check_in_date < $hoy) {
+
+        $isEditando = isset($_POST['recibo_id']);
+        $esPasada = $check_in_date < $hoy;
+
+        if (!$isEditando && $esPasada) {
             throw new Exception("No se pueden reservar fechas pasadas");
         }
-        
+
         if ($check_out_date <= $check_in_date) {
             throw new Exception("Check-out debe ser posterior a check-in");
         }
 
-        // Calcular días de estadía
         $dias = $check_out_date->diff($check_in_date)->days;
         $subtotal = $tarifa_por_noche * $dias;
 
-        // Iniciar transacción
         $pdo->beginTransaction();
 
-        try {
-            // Manejar huésped
-            $huesped_id = $_POST['huesped_id'] ?? null;
-            if (empty($huesped_id)) {
-                if (empty($_POST['nuevo_huesped_nombre'])) {
-                    throw new Exception("El nombre del huésped es obligatorio");
-                }
-                
-                $stmt = $pdo->prepare("INSERT INTO huespedes 
-                    (nombre, rfc, telefono, correo) 
-                    VALUES (?, ?, ?, ?)");
-                $stmt->execute([
-                    $_POST['nuevo_huesped_nombre'],
-                    $_POST['nuevo_huesped_rfc'] ?? null,
-                    $_POST['nuevo_huesped_telefono'] ?? null,
-                    $_POST['nuevo_huesped_correo'] ?? null
-                ]);
-                $huesped_id = $pdo->lastInsertId();
+        $huesped_id = $_POST['huesped_id'] ?? null;
+        if (empty($huesped_id)) {
+            if (empty($_POST['nuevo_huesped_nombre'])) {
+                throw new Exception("El nombre del huésped es obligatorio");
             }
 
-            // Insertar datos de WiFi
-            $stmt = $pdo->prepare("INSERT INTO internet 
-                (Nombre_wifi, contrasena) 
-                VALUES (?, ?)");
+            $stmt = $pdo->prepare("INSERT INTO huespedes (nombre, rfc, telefono, correo) VALUES (?, ?, ?, ?)");
             $stmt->execute([
-                $_POST['Nombre_wifi'],
-                $_POST['contrasena']
+                $_POST['nuevo_huesped_nombre'],
+                $_POST['nuevo_huesped_rfc'] ?? null,
+                $_POST['nuevo_huesped_telefono'] ?? null,
+                $_POST['nuevo_huesped_correo'] ?? null
             ]);
-
-            // Calcular descuento INAPAM
-            $descuento = 0;
-            $numero_inapam = null;
-            if (isset($_POST['aplicar_descuento_inapam'])) {
-                $valor = (float)$_POST['valor_descuento_inapam'];
-                $descuento = ($_POST['tipo_descuento_inapam'] === 'porcentaje') 
-                    ? $subtotal * ($valor / 100)
-                    : $valor;
-                $numero_inapam = $_POST['numero_inapan'] ?? null;
-            }
-
-            // Calcular total
-            $total_pagar = ($subtotal - $descuento) * (1 + ($iva + $ish) / 100);
-
-            // Actualizar recibo
-            $recibo_id = $_POST['recibo_id'];
-            $stmt = $pdo->prepare("UPDATE recibos SET 
-                id_huesped = ?,
-                check_in = ?,
-                check_out = ?,
-                subtotal = ?,
-                descuento = ?,
-                iva = ?,
-                ish = ?,
-                total_pagar = ?,
-                estado_pago = ?,
-                total_pagado = ?,
-                saldo = ?,
-                metodo_pago_primer = ?,
-                metodo_pago_restante = ?,
-                numero_inapan = ?
-                WHERE id = ?");
-            
-            $stmt->execute([
-                $huesped_id,
-                $check_in,
-                $check_out,
-                $subtotal,
-                $descuento,
-                $iva,
-                $ish,
-                $total_pagar,
-                'pendiente',
-                0,
-                $total_pagar,
-                'Pendiente',
-                'Pendiente',
-                $numero_inapam,
-                $recibo_id
-            ]);
-
-            // Manejar pagos
-            $total_pagado = 0;
-            if ($_POST['tipo_pago'] === 'completo') {
-                $metodo = $_POST['metodo_pago_completo'];
-                $detalle_metodo = $metodo;
-                
-                if ($metodo === 'otro') {
-                    $detalle_metodo = $_POST['detalle_metodo_completo'] ?? 'Otro método';
-                }
-                
-                $monto = (float)$_POST['monto_pago_completo'];
-                $total_pagado = $monto;
-                
-                // Insertar anticipo
-                $stmt = $pdo->prepare("INSERT INTO anticipos 
-                    (recibo_id, monto, metodo_pago, fecha) 
-                    VALUES (?, ?, ?, NOW())");
-                $stmt->execute([$recibo_id, $monto, $detalle_metodo]);
-                
-            } else {
-                foreach ($_POST['primer_pago'] as $key => $monto) {
-                    $metodo = $_POST['metodo_pago_parcial'][$key];
-                    $detalle_metodo = $metodo;
-                    
-                    if ($metodo === 'otro') {
-                        $detalle_metodo = $_POST['detalle_metodo_parcial'][$key] ?? 'Otro método';
-                    }
-                    
-                    $monto = (float)$monto;
-                    $total_pagado += $monto;
-                    
-                    $stmt = $pdo->prepare("INSERT INTO anticipos 
-                        (recibo_id, monto, metodo_pago, fecha) 
-                        VALUES (?, ?, ?, NOW())");
-                    $stmt->execute([$recibo_id, $monto, $detalle_metodo]);
-                }
-            }
-
-            // Actualizar estado de pago
-            $saldo = $total_pagar - $total_pagado;
-            $estado = $saldo <= 0 ? 'pagado' : 'pendiente';
-            
-            $stmt = $pdo->prepare("UPDATE recibos SET 
-                total_pagado = ?,
-                saldo = ?,
-                estado_pago = ?,
-                metodo_pago_restante = ?
-                WHERE id = ?");
-            $stmt->execute([$total_pagado, $saldo, $estado, $_POST['metodo_pago_parcial'][0], $recibo_id]);
-
-            // Insertar elementos reservados
-            $stmt = $pdo->prepare("DELETE FROM detalles_reserva WHERE recibo_id = ?");
-            $stmt->execute([$recibo_id]);
-
-            $stmt = $pdo->prepare("INSERT INTO detalles_reserva 
-                (recibo_id, elemento_id, tarifa) 
-                VALUES (?, ?, ?)");
-                
-            foreach ($_POST['elementos'] as $elemento_id) {
-                if (!is_numeric($elemento_id)) {
-                    throw new Exception("ID de elemento inválido");
-                }
-                $stmt->execute([$recibo_id, $elemento_id, $tarifa_por_noche]);
-            }
-
-            $pdo->commit();
-
-            echo json_encode([
-                'success' => true,
-                'message' => 'Reserva actualizada exitosamente',
-                'recibo_id' => $recibo_id,
-                'redirect' => 'recibos.php' // URL de redirección
-            ]);
-        } catch (Exception $e) {
-            $pdo->rollBack();
-            throw $e;
+            $huesped_id = $pdo->lastInsertId();
         }
-        
+
+        $stmt = $pdo->prepare("INSERT INTO internet (Nombre_wifi, contrasena) VALUES (?, ?)");
+        $stmt->execute([
+            $_POST['Nombre_wifi'],
+            $_POST['contrasena']
+        ]);
+
+        $descuento = 0;
+        $numero_inapam = null;
+
+        if (isset($_POST['aplicar_descuento_inapam'])) {
+            $tipo_descuento = $_POST['tipo_descuento_inapam'] ?? 'porcentaje';
+            $valor_descuento = (float)$_POST['valor_descuento_inapam'] ?? 0;
+            $numero_inapam = $_POST['numero_inapan'] ?? null;
+
+            $descuento = $tipo_descuento === 'porcentaje'
+                ? $subtotal * ($valor_descuento / 100)
+                : $valor_descuento;
+        }
+
+        $total_pagar = ($subtotal - $descuento) * (1 + ($iva + $ish) / 100);
+
+        $stmt = $pdo->prepare("DELETE FROM anticipos WHERE recibo_id = ?");
+        $stmt->execute([$recibo_id]);
+
+        $total_pagado = 0;
+        $metodo_pago_primer = 'Pendiente';
+        $metodo_pago_restante = 'Pendiente';
+
+        $tipo_pago = $_POST['tipo_pago'] ?? 'completo';
+
+        if ($tipo_pago === 'completo') {
+            $metodo = $_POST['metodo_pago_completo'];
+            $detalle_metodo = $metodo === 'otro' ? ($_POST['detalle_metodo_completo'] ?? 'Otro método') : $metodo;
+            $monto = (float)$_POST['monto_pago_completo'];
+            $total_pagado = $monto;
+            $metodo_pago_primer = $detalle_metodo;
+
+            $stmt = $pdo->prepare("INSERT INTO anticipos (recibo_id, monto, metodo_pago, fecha) VALUES (?, ?, ?, NOW())");
+            $stmt->execute([$recibo_id, $monto, $detalle_metodo]);
+        } elseif (!empty($_POST['primer_pago']) && is_array($_POST['primer_pago'])) {
+            foreach ($_POST['primer_pago'] as $key => $monto) {
+                $metodo = $_POST['metodo_pago_parcial'][$key] ?? 'otro';
+                $detalle_metodo = $metodo === 'otro' ? ($_POST['detalle_metodo_parcial'][$key] ?? 'Otro método') : $metodo;
+                $monto = (float)$monto;
+                $total_pagado += $monto;
+
+                if ($key == 0) {
+                    $metodo_pago_primer = $detalle_metodo;
+                } else {
+                    $metodo_pago_restante = $detalle_metodo;
+                }
+
+                $stmt = $pdo->prepare("INSERT INTO anticipos (recibo_id, monto, metodo_pago, fecha) VALUES (?, ?, ?, NOW())");
+                $stmt->execute([$recibo_id, $monto, $detalle_metodo]);
+            }
+        }
+
+        $saldo = max($total_pagar - $total_pagado, 0);
+        $estado = $saldo <= 0 ? 'pagado' : 'pendiente';
+
+        $stmt = $pdo->prepare("UPDATE recibos SET 
+            id_huesped = ?, check_in = ?, check_out = ?, subtotal = ?, numero_inapan = ?, 
+            descuento = ?, iva = ?, ish = ?, total_pagar = ?, estado_pago = ?, total_pagado = ?, 
+            saldo = ?, metodo_pago_primer = ?, metodo_pago_restante = ?, estado = ?, 
+            updated_at = NOW()
+            WHERE id = ?");
+        $stmt->execute([
+            $huesped_id, $check_in, $check_out, $subtotal, $numero_inapam,
+            $descuento, $iva, $ish, $total_pagar, $estado, $total_pagado,
+            $saldo, $metodo_pago_primer, $metodo_pago_restante, $estado,
+            $recibo_id
+        ]);
+
+        $stmt = $pdo->prepare("DELETE FROM detalles_reserva WHERE recibo_id = ?");
+        $stmt->execute([$recibo_id]);
+
+        $stmt = $pdo->prepare("INSERT INTO detalles_reserva (recibo_id, elemento_id, tarifa) VALUES (?, ?, ?)");
+        foreach ($_POST['elementos'] as $elemento_id) {
+            if (!is_numeric($elemento_id)) {
+                throw new Exception("ID de elemento inválido");
+            }
+            $stmt->execute([$recibo_id, $elemento_id, $tarifa_por_noche]);
+        }
+
+        $pdo->commit();
+
+        header('Location: recibos.php');
+        exit;
     } catch (Exception $e) {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
         manejarError($e->getMessage());
     }
     exit;
 }
 
-// Obtener datos del recibo
-if (isset($_GET['id'])) {
+if ($_SERVER['REQUEST_METHOD'] === 'GET') {
+    if (!isset($_GET['id']) || !is_numeric($_GET['id'])) {
+        die("ID de recibo no válido.");
+    }
+
+    $recibo_id = $_GET['id'];
+
+    // Obtener los datos del recibo
     $stmt = $pdo->prepare("SELECT * FROM recibos WHERE id = ?");
-    $stmt->execute([$_GET['id']]);
-    $recibo = $stmt->fetch();
+    $stmt->execute([$recibo_id]);
+    $recibo = $stmt->fetch(PDO::FETCH_ASSOC);
 
-    // Determinar tipo de pago dinámicamente
-    $recibo['tipo_pago'] = ($recibo['estado_pago'] === 'pagado' || $recibo['total_pagado'] >= $recibo['total_pagar'])
-                          ? 'completo' 
-                          : 'parcial';
+    if (!$recibo) {
+        die("No se encontró la reserva.");
+    }
 
-    // Obtener elementos reservados
+    // Obtener elementos de la reserva
     $stmt = $pdo->prepare("SELECT elemento_id FROM detalles_reserva WHERE recibo_id = ?");
-    $stmt->execute([$_GET['id']]);
+    $stmt->execute([$recibo_id]);
     $elementos = $stmt->fetchAll(PDO::FETCH_COLUMN);
-    
-    // En el bloque GET, al recuperar la tarifa:
-    $stmt = $pdo->prepare("SELECT tarifa FROM detalles_reserva WHERE recibo_id = ? LIMIT 1");
-    $stmt->execute([$_GET['id']]);
-    $tarifa = $stmt->fetchColumn();
 
     // Obtener anticipos
     $stmt = $pdo->prepare("SELECT * FROM anticipos WHERE recibo_id = ?");
-    $stmt->execute([$_GET['id']]);
-    $anticipos = $stmt->fetchAll();
+    $stmt->execute([$recibo_id]);
+    $anticipos = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+    // Variables auxiliares
+    $tipo_pago = count($anticipos) > 1 ? 'parcial' : 'completo';
+    $metodo_pago_primer = $recibo['metodo_pago_primer'] ?? '';
+    $tarifa = $recibo['subtotal'] ?? 0;
 }
+
 ?>
+
 
 <!DOCTYPE html>
 <html lang="es">
@@ -525,20 +496,22 @@ button:hover {
 </head>
 <body>
     <button class="toggle-sidebar d-md-none"><i class="fas fa-bars"></i></button>
+  <!-- Sidebar -->
+  <aside class="sidebar">
+    <h2><i class="fas fa-columns"></i> Menú</h2>
+    <ul>
+    <li><a href="bottom_menu.php"><i class="fas fa-home"></i> Inicio</a></li>
+        <?php if ($rol === 'admin'): ?>
+            <li><a href="habitaciones.php"><i class="fas fa-bed"></i> Habitaciones</a></li>
+            <li><a href="huespedes.php"><i class="fas fa-users"></i> Huéspedes</a></li>
+        <?php endif; ?>
+        <li><a href="cancelaciones.php"><i class="fas fa-tools"></i> Cancelaciones</a></li>
+        <li><a href="Crear_Recibo.php"><i class="fas fa-pen-alt"></i> Generar Recibo</a></li>
+        <li><a href="recibos.php"><i class="fas fa-file-invoice"></i> Registro de Caja</a></li>
+        <li><a href="logout.php" class="logout-btn"><i class="fas fa-sign-out-alt"></i> Salir</a></li>
+    </ul>
+</aside>
 
-    <aside class="sidebar">
-        <h2><i class="fas fa-columns"></i> Menú</h2>
-        <ul>
-            <?php if ($rol === 'admin'): ?>
-                <li><a href="index.php"><i class="fas fa-home"></i> Inicio</a></li>
-                <li><a href="habitaciones.php"><i class="fas fa-bed"></i> Habitaciones</a></li>
-                <li><a href="huespedes.php"><i class="fas fa-users"></i> Huéspedes</a></li>
-            <?php endif; ?>
-            <li><a href="Crear_Recibo.php"><i class="fas fa-pen-alt"></i> Generar Recibo</a></li>
-            <li><a href="recibos.php"><i class="fas fa-file-invoice"></i> Registro de Caja</a></li>
-            <li><a href="index.php" class="logout-btn"><i class="fas fa-sign-out-alt"></i> Salir</a></li>
-        </ul>
-    </aside>
     <div class="overlay"></div>
     <div class="contenedor">
         <h1>Editar Reserva #<?= $recibo['id'] ?></h1>
@@ -662,59 +635,60 @@ button:hover {
 
             <!-- Sección Pagos -->
             <div class="seccion" id="seccion-pagos">
-                <i class="fas fa-money-check section-icon"></i>
-                <select id="tipo_pago" name="tipo_pago">
-                    <option value="completo" <?= $recibo['tipo_pago'] === 'completo' ? 'selected' : '' ?>>Completo</option>
-                    <option value="parcial" <?= $recibo['tipo_pago'] === 'parcial' ? 'selected' : '' ?>>Parcial</option>
-                </select>
+    <i class="fas fa-money-check section-icon"></i>
+    <select id="tipo_pago" name="tipo_pago">
+        <option value="completo" <?= $tipo_pago === 'completo' ? 'selected' : '' ?>>Completo</option>
+        <option value="parcial" <?= $tipo_pago === 'parcial' ? 'selected' : '' ?>>Parcial</option>
+    </select>
 
-                <!-- Pago Completo -->
-                <div id="pago-completo" style="display: <?= $recibo['tipo_pago'] === 'completo' ? 'block' : 'none' ?>;">
-                    <div class="campo-formulario">
-                        <label>Método de Pago:</label>
-                        <select name="metodo_pago_completo">
-                            <?php $metodoActual = $recibo['metodo_pago_primer']; ?>
-                            <option value="efectivo" <?= $metodoActual === 'efectivo' ? 'selected' : '' ?>>Efectivo</option>
-                            <option value="tarjeta_debito" <?= $metodoActual === 'tarjeta_debito' ? 'selected' : '' ?>>Tarjeta Débito</option>
-                            <option value="tarjeta_credito" <?= $metodoActual === 'tarjeta_credito' ? 'selected' : '' ?>>Tarjeta Crédito</option>
-                            <option value="transferencia" <?= $metodoActual === 'transferencia' ? 'selected' : '' ?>>Transferencia</option>
-                            <option value="otro" <?= !in_array($metodoActual, ['efectivo','tarjeta_debito','tarjeta_credito','transferencia']) ? 'selected' : '' ?>>Otro</option>
-                        </select>
-                        <div class="otro-metodo-container" style="display: <?= !in_array($metodoActual, ['efectivo','tarjeta_debito','tarjeta_credito','transferencia']) ? 'block' : 'none' ?>;">
-                            <input type="text" name="detalle_metodo_completo" 
-                                value="<?= htmlspecialchars(!in_array($metodoActual, ['efectivo','tarjeta_debito','tarjeta_credito','transferencia']) ? $metodoActual : '') ?>">
-                        </div>
-                    </div>
-                    <div class="campo-formulario">
-                        <label>Monto Total:</label>
-                        <input type="number" name="monto_pago_completo" step="0.01"
-                            value="<?= htmlspecialchars($recibo['total_pagado']) ?>" required>
-                    </div>
-                </div>
-
-                <!-- Pagos Parciales -->
-                <div id="pago-parcial" style="display: <?= $recibo['tipo_pago'] === 'parcial' ? 'block' : 'none' ?>;">
-                    <button type="button" id="agregar-pago">+ Añadir Pago</button>
-                    <?php foreach ($anticipos as $index => $pago): ?>
-                    <div class="pago-item">
-                        <select name="metodo_pago_parcial[]" class="metodo-pago">
-                            <?php $metodoPago = $pago['metodo_pago']; ?>
-                            <option value="efectivo" <?= $metodoPago === 'efectivo' ? 'selected' : '' ?>>Efectivo</option>
-                            <option value="tarjeta_debito" <?= $metodoPago === 'tarjeta_debito' ? 'selected' : '' ?>>Tarjeta Débito</option>
-                            <option value="tarjeta_credito" <?= $metodoPago === 'tarjeta_credito' ? 'selected' : '' ?>>Tarjeta Crédito</option>
-                            <option value="transferencia" <?= $metodoPago === 'transferencia' ? 'selected' : '' ?>>Transferencia</option>
-                            <option value="otro" <?= !in_array($metodoPago, ['efectivo','tarjeta_debito','tarjeta_credito','transferencia']) ? 'selected' : '' ?>>Otro</option>
-                        </select>
-                        <div class="otro-metodo-container" style="display: <?= !in_array($metodoPago, ['efectivo','tarjeta_debito','tarjeta_credito','transferencia']) ? 'block' : 'none' ?>;">
-                            <input type="text" name="detalle_metodo_parcial[]" 
-                                value="<?= htmlspecialchars(!in_array($metodoPago, ['efectivo','tarjeta_debito','tarjeta_credito','transferencia']) ? $metodoPago : '') ?>">
-                        </div>
-                        <input type="number" name="primer_pago[]" step="0.01" 
-                            value="<?= htmlspecialchars($pago['monto']) ?>" required>
-                    </div>
-                    <?php endforeach; ?>
-                </div>
+    <!-- Pago Completo -->
+    <div id="pago-completo" style="display: <?= $tipo_pago === 'completo' ? 'block' : 'none' ?>;">
+        <div class="campo-formulario">
+            <label>Método de Pago:</label>
+            <select name="metodo_pago_completo" class="metodo-pago">
+                <?php $metodoActual = $recibo['metodo_pago_primer'] ?? ''; ?>
+                <option value="efectivo" <?= $metodoActual === 'efectivo' ? 'selected' : '' ?>>Efectivo</option>
+                <option value="tarjeta_debito" <?= $metodoActual === 'tarjeta_debito' ? 'selected' : '' ?>>Tarjeta Débito</option>
+                <option value="tarjeta_credito" <?= $metodoActual === 'tarjeta_credito' ? 'selected' : '' ?>>Tarjeta Crédito</option>
+                <option value="transferencia" <?= $metodoActual === 'transferencia' ? 'selected' : '' ?>>Transferencia</option>
+                <option value="otro" <?= !in_array($metodoActual, ['efectivo', 'tarjeta_debito', 'tarjeta_credito', 'transferencia']) ? 'selected' : '' ?>>Otro</option>
+            </select>
+            <div class="otro-metodo-container" style="display: <?= !in_array($metodoActual, ['efectivo', 'tarjeta_debito', 'tarjeta_credito', 'transferencia']) ? 'block' : 'none' ?>;">
+                <input type="text" name="detalle_metodo_completo"
+                    value="<?= htmlspecialchars(!in_array($metodoActual, ['efectivo', 'tarjeta_debito', 'tarjeta_credito', 'transferencia']) ? $metodoActual : '') ?>">
             </div>
+        </div>
+        <div class="campo-formulario">
+            <label>Monto Total:</label>
+            <input type="number" name="monto_pago_completo" step="0.01" value="<?= htmlspecialchars($recibo['total_pagado'] ?? '0.00') ?>">
+
+        </div>
+    </div>
+
+    <!-- Pagos Parciales -->
+    <div id="pago-parcial" style="display: <?= $tipo_pago === 'parcial' ? 'block' : 'none' ?>;">
+        <button type="button" id="agregar-pago">+ Añadir Pago</button>
+        <?php foreach ($anticipos as $index => $pago): ?>
+        <div class="pago-item">
+            <?php $metodoPago = $pago['metodo_pago']; ?>
+            <select name="metodo_pago_parcial[]" class="metodo-pago">
+                <option value="efectivo" <?= $metodoPago === 'efectivo' ? 'selected' : '' ?>>Efectivo</option>
+                <option value="tarjeta_debito" <?= $metodoPago === 'tarjeta_debito' ? 'selected' : '' ?>>Tarjeta Débito</option>
+                <option value="tarjeta_credito" <?= $metodoPago === 'tarjeta_credito' ? 'selected' : '' ?>>Tarjeta Crédito</option>
+                <option value="transferencia" <?= $metodoPago === 'transferencia' ? 'selected' : '' ?>>Transferencia</option>
+                <option value="otro" <?= !in_array($metodoPago, ['efectivo', 'tarjeta_debito', 'tarjeta_credito', 'transferencia']) ? 'selected' : '' ?>>Otro</option>
+            </select>
+            <div class="otro-metodo-container" style="display: <?= !in_array($metodoPago, ['efectivo', 'tarjeta_debito', 'tarjeta_credito', 'transferencia']) ? 'block' : 'none' ?>;">
+                <input type="text" name="detalle_metodo_parcial[]"
+                    value="<?= htmlspecialchars(!in_array($metodoPago, ['efectivo', 'tarjeta_debito', 'tarjeta_credito', 'transferencia']) ? $metodoPago : '') ?>">
+            </div>
+            <input type="number" name="primer_pago[]" step="0.01"
+                value="<?= htmlspecialchars($pago['monto']) ?>" required>
+        </div>
+        <?php endforeach; ?>
+    </div>
+</div>
+
 
             <!-- Sección Wifi -->
             <div class="seccion" id="seccion-wifi">
@@ -745,187 +719,166 @@ button:hover {
     </div>
 
     <script>
-    document.addEventListener('DOMContentLoaded', function() {
-        const form = document.getElementById('formEditar');
-        const tipoPago = document.getElementById('tipo_pago');
-        const huespedSelect = document.getElementById('huesped_id');
-        const nuevoHuespedDiv = document.getElementById('nuevo-huesped');
-        const nombreInput = document.getElementById('nuevo_huesped_nombre');
+document.addEventListener('DOMContentLoaded', function() {
+    const form = document.getElementById('formEditar');
+    const tipoPago = document.getElementById('tipo_pago');
+    const huespedSelect = document.getElementById('huesped_id');
+    const nuevoHuespedDiv = document.getElementById('nuevo-huesped');
+    const nombreInput = document.getElementById('nuevo_huesped_nombre');
+    const montoCompletoInput = document.querySelector('[name="monto_pago_completo"]');
+    const pagoCompleto = document.getElementById('pago-completo');
+    const pagoParcial = document.getElementById('pago-parcial');
 
-        // Manejar nuevo huésped
-        function actualizarCamposHuesped() {
-            if (huespedSelect.value === '') {
-                nuevoHuespedDiv.style.display = 'block';
-                nombreInput.setAttribute('required', 'required');
-            } else {
-                nuevoHuespedDiv.style.display = 'none';
-                nombreInput.removeAttribute('required');
-            }
+    // Manejo de nuevo huésped
+    function actualizarCamposHuesped() {
+        if (huespedSelect.value === '') {
+            nuevoHuespedDiv.style.display = 'block';
+            nombreInput.setAttribute('required', 'required');
+        } else {
+            nuevoHuespedDiv.style.display = 'none';
+            nombreInput.removeAttribute('required');
         }
-        huespedSelect.addEventListener('change', actualizarCamposHuesped);
-        actualizarCamposHuesped();
+    }
+    huespedSelect.addEventListener('change', actualizarCamposHuesped);
+    actualizarCamposHuesped();
 
-        // Manejar descuento INAPAM
-        const aplicarDescuentoInapam = document.getElementById('aplicar_descuento_inapam');
-        if (aplicarDescuentoInapam) {
-            aplicarDescuentoInapam.addEventListener('change', function() {
-                const camposDescuento = document.getElementById('campos-descuento');
-                if (this.checked) {
-                    camposDescuento.style.display = 'block';
-                } else {
-                    camposDescuento.style.display = 'none';
-                }
-            });
+    // Mostrar campos descuento INAPAM
+    const aplicarDescuento = document.getElementById('aplicar_descuento_inapam');
+    if (aplicarDescuento) {
+        aplicarDescuento.addEventListener('change', function () {
+            document.getElementById('campos-descuento').style.display = this.checked ? 'block' : 'none';
+        });
+    }
+
+    // Mostrar/ocultar secciones de pago
+    function actualizarSeccionPagos() {
+        if (tipoPago.value === 'completo') {
+            pagoCompleto.style.display = 'block';
+            pagoParcial.style.display = 'none';
+            montoCompletoInput.setAttribute('required', 'required');
+        } else {
+            pagoCompleto.style.display = 'none';
+            pagoParcial.style.display = 'block';
+            montoCompletoInput.removeAttribute('required');
         }
+    }
+    tipoPago.addEventListener('change', actualizarSeccionPagos);
+    actualizarSeccionPagos();
 
-        // Manejar tipo de pago
-        function actualizarSeccionPagos() {
-            const pagoCompleto = document.getElementById('pago-completo');
-            const pagoParcial = document.getElementById('pago-parcial');
-            
-            if (tipoPago.value === 'completo') {
-                pagoCompleto.style.display = 'block';
-                pagoParcial.style.display = 'none';
-            } else {
-                pagoCompleto.style.display = 'none';
-                pagoParcial.style.display = 'block';
-            }
-        }
-        tipoPago.addEventListener('change', actualizarSeccionPagos);
-        actualizarSeccionPagos();
+    // Añadir pagos parciales
+    document.getElementById('agregar-pago').addEventListener('click', function() {
+        const div = document.createElement('div');
+        div.className = 'pago-item';
+        div.innerHTML = `
+            <select name="metodo_pago_parcial[]" class="metodo-pago">
+                <option value="efectivo">Efectivo</option>
+                <option value="tarjeta_debito">Tarjeta Débito</option>
+                <option value="tarjeta_credito">Tarjeta Crédito</option>
+                <option value="transferencia">Transferencia</option>
+                <option value="otro">Otro</option>
+            </select>
+            <div class="otro-metodo-container" style="display: none;">
+                <input type="text" name="detalle_metodo_parcial[]" placeholder="Especificar método">
+            </div>
+            <input type="number" name="primer_pago[]" step="0.01" placeholder="Monto">
+        `;
+        pagoParcial.appendChild(div);
 
-        // Agregar pagos parciales
-        document.getElementById('agregar-pago').addEventListener('click', function() {
-            const div = document.createElement('div');
-            div.className = 'pago-item';
-            div.innerHTML = `
-                <select name="metodo_pago_parcial[]" class="metodo-pago">
-                    <option value="efectivo">Efectivo</option>
-                    <option value="tarjeta_debito">Tarjeta Débito</option>
-                    <option value="tarjeta_credito">Tarjeta Crédito</option>
-                    <option value="transferencia">Transferencia</option>
-                    <option value="otro">Otro</option>
-                </select>
-                <div class="otro-metodo-container" style="display: none;">
-                    <input type="text" name="detalle_metodo_parcial[]" placeholder="Especificar método">
-                </div>
-                <input type="number" name="primer_pago[]" step="0.01" placeholder="Monto">
-            `;
-            document.getElementById('pago-parcial').appendChild(div);
-
-            // Evento para método "Otro"
-            div.querySelector('.metodo-pago').addEventListener('change', function() {
-                const container = this.parentElement.querySelector('.otro-metodo-container');
-                container.style.display = this.value === 'otro' ? 'block' : 'none';
-            });
-        });
-
-        // Calcular totales
-        function calcularTotales() {
-            // Obtener valores principales
-            const tarifa = parseFloat(document.getElementById('tarifa_por_noche').value) || 0;
-            const checkIn = new Date(form.check_in.value);
-            const checkOut = new Date(form.check_out.value);
-            
-            // Calcular días
-            const diferenciaTiempo = checkOut.getTime() - checkIn.getTime();
-            const dias = Math.ceil(diferenciaTiempo / (1000 * 3600 * 24)) || 0;
-            
-            // Calcular subtotal
-            const subtotal = tarifa * dias;
-
-            // Calcular descuento
-            let descuento = 0;
-            if (aplicarDescuentoInapam.checked) {
-                const tipoDescuento = document.getElementById('tipo_descuento_inapam').value;
-                const valorDescuento = parseFloat(document.getElementById('valor_descuento_inapam').value) || 0;
-                
-                descuento = tipoDescuento === 'porcentaje' 
-                    ? subtotal * (valorDescuento / 100)
-                    : valorDescuento;
-            }
-
-            // Calcular impuestos
-            const iva = parseFloat(document.getElementById('iva').value) || 0;
-            const ish = parseFloat(document.getElementById('ish').value) || 0;
-            const baseImponible = subtotal - descuento;
-            const impuestos = baseImponible * (iva + ish) / 100;
-            
-            // Calcular total
-            const total = baseImponible + impuestos;
-
-            // Calcular pagos
-            let pagos = 0;
-            if (tipoPago.value === 'completo') {
-                pagos = parseFloat(document.querySelector('#pago-completo input[type="number"]').value) || 0;
-            } else {
-                pagos = Array.from(document.querySelectorAll('#pago-parcial input[type="number"]'))
-                    .reduce((sum, input) => sum + (parseFloat(input.value) || 0), 0);
-            }
-
-            // Actualizar UI
-            document.getElementById('subtotal').textContent = subtotal.toFixed(2);
-            document.getElementById('descuento').textContent = descuento.toFixed(2);
-            document.getElementById('impuestos').textContent = impuestos.toFixed(2);
-            document.getElementById('total').textContent = total.toFixed(2);
-            document.getElementById('pagado').textContent = pagos.toFixed(2);
-            
-            const saldo = total - pagos;
-            document.getElementById('saldo').textContent = Math.max(saldo, 0).toFixed(2);
-
-            // Calcular cambio
-            const usandoEfectivo = tipoPago.value === 'completo' 
-                ? document.querySelector('#pago-completo select').value === 'efectivo'
-                : Array.from(document.querySelectorAll('#pago-parcial select'))
-                    .some(select => select.value === 'efectivo');
-
-            if (usandoEfectivo && pagos > total) {
-                document.getElementById('cambio').style.display = 'block';
-                document.getElementById('cambio-monto').textContent = (pagos - total).toFixed(2);
-            } else {
-                document.getElementById('cambio').style.display = 'none';
-            }
-        }
-
-        // Eventos de actualización
-        const elementosCalculo = [
-            'check_in', 'check_out', 'iva', 'ish', 'tarifa_por_noche',
-            'tipo_descuento_inapam', 'valor_descuento_inapam'
-        ];
-
-        elementosCalculo.forEach(id => {
-            const elemento = document.getElementById(id);
-            if (elemento) {
-                elemento.addEventListener('input', calcularTotales);
-                elemento.addEventListener('change', calcularTotales);
-            }
-        });
-
-        document.getElementById('aplicar_descuento_inapam').addEventListener('change', calcularTotales);
-        document.addEventListener('input', function(e) {
-            if (e.target.matches('#pago-completo input, #pago-parcial input')) {
-                calcularTotales();
-            }
-        });
-
-        // Inicializar cálculos
-        calcularTotales();
-
-        // Toggle del sidebar en móvil
-        const toggleButton = document.querySelector('.toggle-sidebar');
-        const sidebar = document.querySelector('.sidebar');
-        const overlay = document.querySelector('.overlay');
-
-        toggleButton.addEventListener('click', function() {
-            sidebar.classList.toggle('active');
-            overlay.classList.toggle('active');
-        });
-
-        overlay.addEventListener('click', function() {
-            sidebar.classList.remove('active');
-            overlay.classList.remove('active');
+        // Manejar método "otro"
+        const select = div.querySelector('.metodo-pago');
+        select.addEventListener('change', function () {
+            const contenedor = div.querySelector('.otro-metodo-container');
+            contenedor.style.display = this.value === 'otro' ? 'block' : 'none';
         });
     });
+
+    // Método de pago "otro"
+    document.addEventListener('change', function(e) {
+        if (e.target.classList.contains('metodo-pago')) {
+            const container = e.target.closest('.pago-item')?.querySelector('.otro-metodo-container');
+            if (container) {
+                container.style.display = e.target.value === 'otro' ? 'block' : 'none';
+            }
+        }
+    });
+
+    // Cálculo de totales
+    function calcularTotales() {
+        const tarifa = parseFloat(document.getElementById('tarifa_por_noche').value) || 0;
+        const checkIn = new Date(form.check_in.value);
+        const checkOut = new Date(form.check_out.value);
+        const dias = Math.ceil((checkOut - checkIn) / (1000 * 60 * 60 * 24)) || 0;
+        const subtotal = tarifa * dias;
+
+        let descuento = 0;
+        if (aplicarDescuento.checked) {
+            const tipo = document.getElementById('tipo_descuento_inapam').value;
+            const valor = parseFloat(document.getElementById('valor_descuento_inapam').value) || 0;
+            descuento = tipo === 'porcentaje' ? subtotal * valor / 100 : valor;
+        }
+
+        const iva = parseFloat(document.getElementById('iva').value) || 0;
+        const ish = parseFloat(document.getElementById('ish').value) || 0;
+        const impuestos = (subtotal - descuento) * (iva + ish) / 100;
+        const total = subtotal - descuento + impuestos;
+
+        let pagado = 0;
+        if (tipoPago.value === 'completo') {
+            pagado = parseFloat(montoCompletoInput.value) || 0;
+        } else {
+            document.querySelectorAll('#pago-parcial input[name="primer_pago[]"]').forEach(input => {
+                pagado += parseFloat(input.value) || 0;
+            });
+        }
+
+        document.getElementById('subtotal').textContent = subtotal.toFixed(2);
+        document.getElementById('descuento').textContent = descuento.toFixed(2);
+        document.getElementById('impuestos').textContent = impuestos.toFixed(2);
+        document.getElementById('total').textContent = total.toFixed(2);
+        document.getElementById('pagado').textContent = pagado.toFixed(2);
+        document.getElementById('saldo').textContent = Math.max(total - pagado, 0).toFixed(2);
+
+        const cambio = pagado - total;
+        const cambioEl = document.getElementById('cambio');
+        document.getElementById('cambio-monto').textContent = cambio.toFixed(2);
+        cambioEl.style.display = cambio > 0 ? 'block' : 'none';
+    }
+
+    // Eventos para actualizar totales
+    const inputs = [
+        'check_in', 'check_out', 'iva', 'ish', 'tarifa_por_noche',
+        'tipo_descuento_inapam', 'valor_descuento_inapam'
+    ];
+    inputs.forEach(id => {
+        const el = document.getElementById(id);
+        if (el) {
+            el.addEventListener('input', calcularTotales);
+            el.addEventListener('change', calcularTotales);
+        }
+    });
+
+    document.addEventListener('input', function(e) {
+        if (e.target.matches('[name="primer_pago[]"], [name="monto_pago_completo"]')) {
+            calcularTotales();
+        }
+    });
+
+    calcularTotales();
+
+    // Sidebar para móviles
+    const toggleButton = document.querySelector('.toggle-sidebar');
+    const sidebar = document.querySelector('.sidebar');
+    const overlay = document.querySelector('.overlay');
+    toggleButton.addEventListener('click', () => {
+        sidebar.classList.toggle('active');
+        overlay.classList.toggle('active');
+    });
+    overlay.addEventListener('click', () => {
+        sidebar.classList.remove('active');
+        overlay.classList.remove('active');
+    });
+});
 </script>
+
 </body>
 </html>

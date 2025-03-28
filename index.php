@@ -36,6 +36,8 @@ $nombre_usuario = $_SESSION['nombre_usuario']; // Asegúrate de que esta variabl
     --transition-speed: 0.3s;
 }
 
+
+
 /* Estilos generales */
 body {
     margin: 0;
@@ -58,9 +60,9 @@ body {
     }
 }
 
-/* Aplicación de la animación al fondo */
+ /*Aplicación de la animación al fondo */
 .content, .welcome-box {
-    background: linear-gradient(-45deg, #ff9a9e, #fad0c4, #fad0c4, #a18cd1);
+    background: linear-gradient(-45deg, #ff9a9e, #fad0c4,rgb(195, 119, 98),rgb(62, 103, 115));
     background-size: 400% 400%;
     animation: gradient-animation 15s ease infinite;
 }
@@ -272,9 +274,12 @@ body {
         max-width: 95%;
     }
 }
+
+
+
 </style>
 </head>
-<body>
+<body background="playa fondo.gif" >
 <main class="content">
     <!-- Contenido principal (Bienvenida) -->
     <div class="welcome-box">
@@ -285,17 +290,21 @@ body {
             <img src="background.jpg" alt="Hotel en la playa" class="welcome-img">
         </div>
     </main>
-
     <!-- Menú abajo (fijo en la parte inferior) -->
     <nav class="bottom-menu">
-        <ul>
-            <li><a href="habitaciones.php"><i class="fas fa-bed"></i> Habitaciones</a></li>
-            <li><a href="huespedes.php"><i class="fas fa-users"></i> Huéspedes</a></li>
-            <li><a href="Crear_Recibo.php"><i class="fas fa-pen-alt"></i> Generar Recibo</a></li>
-            <li><a href="recibos.php"><i class="fas fa-file-invoice"></i> Registro de Caja</a></li>
-            <li><a href="logout.php" class="logout-btn"><i class="fas fa-sign-out-alt"></i> Salir</a></li>
-        </ul>
-    </nav>
+    <ul>
+        <li><a href="habitaciones.php"><i class="fas fa-bed"></i> Habitaciones</a></li>
+        <li><a href="huespedes.php"><i class="fas fa-users"></i> Huéspedes</a></li>
+        <li><a href="Crear_Recibo.php"><i class="fas fa-pen-alt"></i> Generar Recibo</a></li>
+        <li><a href="recibos.php"><i class="fas fa-file-invoice"></i> Registro de Caja</a></li>
+        <li><a href="cancelaciones.php"><i class="fas fa-tools"></i> Cancelaciones</a></li>
+        <li><a href="configuracion.php"><i class="fas fa-cogs"></i> Configuración</a></li>
+        <li><a href="logout.php" class="logout-btn"><i class="fas fa-sign-out-alt"></i> Salir</a></li>
+    </ul>
+</nav>
+
+
+
 
 </body>
 </html
